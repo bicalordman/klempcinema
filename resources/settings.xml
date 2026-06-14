@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<settings>
+    <category label="32100">
+        <!-- Webshare account -->
+        <setting id="ws_builtin_info"
+                 type="lsep"
+                 label="32104"/>
+        <setting id="ws_user"
+                 type="text"
+                 label="32101"
+                 default=""/>
+        <setting id="ws_pass"
+                 type="text"
+                 label="32102"
+                 option="hidden"
+                 default=""/>
+        <setting id="ws_token"
+                 type="text"
+                 label="32103"
+                 default=""
+                 visible="false"/>
+    </category>
+
+    <category label="32110">
+        <!-- Playback -->
+        <setting id="auto_pick_quality"
+                 type="bool"
+                 label="32111"
+                 default="false"/>
+        <setting id="auto_pick_quality_info"
+                 type="lsep"
+                 label="32112"/>
+        <setting id="items_per_page"
+                 type="slider"
+                 label="32115"
+                 default="50"
+                 range="10,10,100"
+                 option="int"/>
+        <setting id="search_history_enabled"
+                 type="bool"
+                 label="32116"
+                 default="true"/>
+    </category>
+
+    <category label="32120">
+        <!-- Dotazy pro rubriky (Webshare /api/search/) -->
+        <setting id="q_movies"
+                 type="text"
+                 label="32121"
+                 default="1080p CZ"/>
+        <setting id="q_movies_new_dub"
+                 type="text"
+                 label="32124"
+                 default="CZ dabing"/>
+        <setting id="q_series"
+                 type="text"
+                 label="32122"
+                 default="S01E01 CZ"/>
+        <setting id="q_series_new_dub"
+                 type="text"
+                 label="32125"
+                 default="S01 CZ dabing"/>
+        <setting id="q_kids"
+                 type="text"
+                 label="32126"
+                 default=""/>
+        <setting id="q_latest"
+                 type="text"
+                 label="32123"
+                 default="1080p"/>
+        <setting id="latest_min_year"
+                 type="number"
+                 label="32127"
+                 default="2025"/>
+        <setting id="latest_info"
+                 type="lsep"
+                 label="32128"/>
+        <setting id="new_dub_min_year"
+                 type="number"
+                 label="32129"
+                 default="2024"/>
+        <setting id="animated_min_quality"
+                 type="labelenum"
+                 label="32190"
+                 values="720p|1080p|2160p"
+                 default="1080p"/>
+    </category>
+
+    <category label="32130">
+        <!-- TMDB metadata (plakáty, hodnocení, popularita) -->
+        <setting id="tmdb_enabled"
+                 type="bool"
+                 label="32131"
+                 default="true"/>
+        <setting id="tmdb_api_key"
+                 type="text"
+                 label="32132"
+                 default=""
+                 enable="eq(-1,true)"/>
+        <setting id="tmdb_lang"
+                 type="enum"
+                 label="32133"
+                 lvalues="32134|32135|32136"
+                 default="0"
+                 enable="eq(-2,true)"/>
+        <setting id="tmdb_info"
+                 type="lsep"
+                 label="32137"/>
+        <setting id="csfd_enabled"
+                 type="bool"
+                 label="32138"
+                 default="true"/>
+        <setting id="csfd_info"
+                 type="lsep"
+                 label="32139"/>
+        <setting id="enrich_skip"
+                 type="bool"
+                 label="32180"
+                 default="false"/>
+    </category>
+
+    <category label="32140">
+        <!-- Řazení a filtrace -->
+        <setting id="sort_movies"
+                 type="enum"
+                 label="32141"
+                 lvalues="32150|32151|32152|32153|32154"
+                 default="0"/>
+        <setting id="sort_series"
+                 type="enum"
+                 label="32142"
+                 lvalues="32155|32153|32151|32154"
+                 default="0"/>
+        <setting id="sort_new_dub"
+                 type="enum"
+                 label="32143"
+                 lvalues="32156|32155|32152|32151|32153"
+                 default="0"/>
+        <setting id="sort_kids"
+                 type="enum"
+                 label="32144"
+                 lvalues="32153|32155|32151"
+                 default="0"/>
+        <setting id="year_min"
+                 type="number"
+                 label="32145"
+                 default="2000"/>
+        <setting id="year_max"
+                 type="number"
+                 label="32146"
+                 default="2026"/>
+        <setting id="kids_only_czech"
+                 type="bool"
+                 label="32147"
+                 default="false"/>
+        <setting id="only_with_poster"
+                 type="bool"
+                 label="32148"
+                 default="false"/>
+        <setting id="only_with_poster_info"
+                 type="lsep"
+                 label="32149"/>
+    </category>
+
+    <category label="32160">
+        <!-- České titulky (OpenSubtitles.org XML-RPC, bez API klíče) -->
+        <setting id="subs_enabled"
+                 type="bool"
+                 label="32161"
+                 default="true"/>
+        <setting id="subs_only_undubbed"
+                 type="bool"
+                 label="32162"
+                 default="true"
+                 enable="eq(-1,true)"/>
+        <setting id="subs_user"
+                 type="text"
+                 label="32164"
+                 default=""
+                 enable="eq(-2,true)"/>
+        <setting id="subs_pass"
+                 type="text"
+                 label="32165"
+                 default=""
+                 option="hidden"
+                 enable="eq(-3,true)"/>
+        <setting id="subs_lang"
+                 type="enum"
+                 label="32166"
+                 lvalues="32167|32168|32169"
+                 default="0"
+                 enable="eq(-4,true)"/>
+        <setting id="subs_user_agent"
+                 type="text"
+                 label="32163"
+                 default="XBMC_Subtitles_v1"
+                 enable="eq(-5,true)"/>
+        <setting id="subs_info"
+                 type="lsep"
+                 label="32170"/>
+    </category>
+</settings>
