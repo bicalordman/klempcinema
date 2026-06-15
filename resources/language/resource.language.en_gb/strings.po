@@ -1,4 +1,4 @@
-# KlempCinema - Czech translation
+# KlempCinema - English translation (en_gb)
 # Addon name: KlempCinema
 # Addon id: plugin.video.klempcinema
 # Addon Provider: Bicalorman
@@ -9,8 +9,8 @@ msgstr ""
 "POT-Creation-Date: 2026-01-01 00:00+0000\n"
 "PO-Revision-Date: 2026-01-01 00:00+0000\n"
 "Last-Translator: Bicalorman\n"
-"Language-Team: Czech\n"
-"Language: cs_CZ\n"
+"Language-Team: English\n"
+"Language: en_GB\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -23,329 +23,329 @@ msgstr "KlempCinema"
 
 msgctxt "#30002"
 msgid "Movies"
-msgstr "Filmy"
+msgstr "Movies"
 
 msgctxt "#30003"
 msgid "TV Shows"
-msgstr "Seriály"
+msgstr "TV Shows"
 
 msgctxt "#30004"
 msgid "Search"
-msgstr "Hledat"
+msgstr "Search"
 
 msgctxt "#30005"
 msgid "Next page..."
-msgstr "Další strana…"
+msgstr "Next page..."
 
 msgctxt "#30006"
 msgid "Enter search query"
-msgstr "Zadej hledaný název"
+msgstr "Enter search query"
 
 msgctxt "#30007"
 msgid "Latest"
-msgstr "Novinky"
+msgstr "Latest"
 
 msgctxt "#30008"
 msgid "Dubbed (CZ/SK)"
-msgstr "Dabing (CZ/SK)"
+msgstr "Dubbed (CZ/SK)"
 
 msgctxt "#30009"
 msgid "My files"
-msgstr "Moje soubory"
+msgstr "My files"
 
 # --- Nové rubriky + picker ---
 
 msgctxt "#30030"
 msgid "Choose quality"
-msgstr "Vyber kvalitu"
+msgstr "Choose quality"
 
 msgctxt "#30040"
 msgid "Newly dubbed movies"
-msgstr "Filmy novinky dabované CZ/SK"
+msgstr "Newly dubbed movies"
 
 msgctxt "#30041"
 msgid "Newly dubbed TV shows"
-msgstr "Nově dabované seriály"
+msgstr "Newly dubbed TV shows"
 
 msgctxt "#30042"
 msgid "Fairy tales (CZ/SK)"
-msgstr "Pohádky CZ/SK"
+msgstr "Fairy tales (CZ/SK)"
 
 msgctxt "#30050"
 msgid "Tip: Without TMDB key the ČSFD fallback will be used (slower)."
-msgstr "Tip: Bez TMDB klíče se pro plakáty/hodnocení použije ČSFD (pomalejší)."
+msgstr "Tip: Without TMDB key the ČSFD fallback will be used (slower)."
 
 msgctxt "#30060"
 msgid "Czech subtitles loaded"
-msgstr "České titulky načteny"
+msgstr "Czech subtitles loaded"
 
 msgctxt "#30061"
 msgid "No Czech subtitles found"
-msgstr "České titulky se nenašly"
+msgstr "No Czech subtitles found"
 
 msgctxt "#30070"
 msgid "Clear cache (TMDB / posters)"
-msgstr "Smazat cache (TMDB / plakáty)"
+msgstr "Clear cache (TMDB / posters)"
 
 msgctxt "#30071"
 msgid "Cache cleared"
-msgstr "Cache vyčištěna"
+msgstr "Cache cleared"
 
 msgctxt "#30072"
 msgid "Test Webshare login (detailed diagnostic)"
-msgstr "Otestovat Webshare přihlášení (detailní diagnostika)"
+msgstr "Test Webshare login (detailed diagnostic)"
 
 # --- Pokračovat ve sledování a TMDB rubriky ---
 
 msgctxt "#30080"
 msgid "Continue watching"
-msgstr "Pokračovat ve sledování"
+msgstr "Continue watching"
 
 msgctxt "#30081"
 msgid "Trending"
-msgstr "Trendy (TMDB)"
+msgstr "Trending"
 
 msgctxt "#30082"
 msgid "Movies by genre"
-msgstr "Filmy podle žánru"
+msgstr "Movies by genre"
 
 msgctxt "#30083"
 msgid "TV shows by genre"
-msgstr "Seriály podle žánru"
+msgstr "TV shows by genre"
 
 msgctxt "#30084"
 msgid "TMDB is required for this feature. Enable in settings."
-msgstr "Pro tuto funkci je nutné mít TMDB povolené v nastavení."
+msgstr "TMDB is required for this feature. Enable in settings."
 
 msgctxt "#30085"
 msgid "Trending movies (week)"
-msgstr "Filmy trendy - tento týden"
+msgstr "Trending movies (week)"
 
 msgctxt "#30086"
 msgid "Trending movies (today)"
-msgstr "Filmy trendy - dnes"
+msgstr "Trending movies (today)"
 
 msgctxt "#30087"
 msgid "Trending TV shows (week)"
-msgstr "Seriály trendy - tento týden"
+msgstr "Trending TV shows (week)"
 
 msgctxt "#30088"
 msgid "Trending TV shows (today)"
-msgstr "Seriály trendy - dnes"
+msgstr "Trending TV shows (today)"
 
 # --- Třídění ---
 
 msgctxt "#30010"
 msgid "Popular"
-msgstr "Populární"
+msgstr "Popular"
 
 msgctxt "#30011"
 msgid "Latest"
-msgstr "Nejnovější"
+msgstr "Latest"
 
 msgctxt "#30012"
 msgid "Rating"
-msgstr "Hodnocení"
+msgstr "Rating"
 
 # --- Chybové a info zprávy ---
 
 msgctxt "#30020"
 msgid "Webshare login required. Please fill in credentials in addon settings."
-msgstr "Pro přehrávání je nutné Webshare přihlášení. Vyplňte údaje v nastavení doplňku."
+msgstr "Webshare login required. Please fill in credentials in addon settings."
 
 msgctxt "#30021"
 msgid "Webshare login failed. Check your username and password."
-msgstr "Přihlášení k Webshare selhalo. Zkontrolujte uživatelské jméno a heslo."
+msgstr "Webshare login failed. Check your username and password."
 
 msgctxt "#30022"
 msgid "Stream URL could not be retrieved."
-msgstr "Nepodařilo se získat adresu streamu."
+msgstr "Stream URL could not be retrieved."
 
 msgctxt "#30023"
 msgid "No results found."
-msgstr "Nebyly nalezeny žádné výsledky."
+msgstr "No results found."
 
 msgctxt "#30024"
 msgid "Loading..."
-msgstr "Načítání…"
+msgstr "Loading..."
 
 msgctxt "#30025"
 msgid "Your Webshare library is empty. Use Movies/Series/Latest categories instead."
-msgstr "Tvá Webshare knihovna je prázdná. Pro běžné prohlížení použij Filmy/Seriály/Novinky."
+msgstr "Your Webshare library is empty. Use Movies/Series/Latest categories instead."
 
 msgctxt "#30090"
 msgid "4K movies"
-msgstr "Filmy 4K"
+msgstr "4K movies"
 
 msgctxt "#30091"
 msgid "BluRay movies"
-msgstr "Filmy BluRay"
+msgstr "BluRay movies"
 
 msgctxt "#30092"
 msgid "Search"
-msgstr "Hledat"
+msgstr "Search"
 
 msgctxt "#30093"
 msgid "Search in 4K..."
-msgstr "Hledat v 4K filmech..."
+msgstr "Search in 4K..."
 
 msgctxt "#30094"
 msgid "Search in BluRay..."
-msgstr "Hledat ve filmech BluRay..."
+msgstr "Search in BluRay..."
 
 msgctxt "#30095"
 msgid "Animated movies CZ/SK"
-msgstr "Filmy animovane CZ/SK"
+msgstr "Animated movies CZ/SK"
 
 msgctxt "#30096"
 msgid "Search in animated..."
-msgstr "Hledat v animovanych filmech..."
+msgstr "Search in animated..."
 
 msgctxt "#30100"
 msgid "Tools (diagnostics & maintenance)"
-msgstr "Nástroje (diagnostika a údržba)"
+msgstr "Tools (diagnostics & maintenance)"
 
 msgctxt "#30101"
 msgid "Clear watch history"
-msgstr "Smazat historii sledování"
+msgstr "Clear watch history"
 
 msgctxt "#30110"
 msgid "Discover (TMDB)"
-msgstr "Objevuj (TMDB)"
+msgstr "Discover (TMDB)"
 
 msgctxt "#30111"
 msgid "Library"
-msgstr "Knihovna"
+msgstr "Library"
 
 msgctxt "#30112"
 msgid "Trending movies"
-msgstr "Trending filmy"
+msgstr "Trending movies"
 
 msgctxt "#30113"
 msgid "Trending series"
-msgstr "Trending seriály"
+msgstr "Trending series"
 
 msgctxt "#30114"
 msgid "Open plugin settings"
-msgstr "Otevřít nastavení pluginu"
+msgstr "Open plugin settings"
 
 msgctxt "#30115"
 msgid "Clear search history"
-msgstr "Smazat historii hledání"
+msgstr "Clear search history"
 
 msgctxt "#30130"
 msgid "Test OpenSubtitles (subtitles diagnostic)"
-msgstr "Otestovat OpenSubtitles (diagnostika titulků)"
+msgstr "Test OpenSubtitles (subtitles diagnostic)"
 
 msgctxt "#30140"
 msgid "TV program today"
-msgstr "TV program dnes"
+msgstr "TV program today"
 
 msgctxt "#30150"
 msgid "Streaming platforms"
-msgstr "Streamovaci platformy >"
+msgstr "Streaming platforms"
 
 msgctxt "#30160"
 msgid "Voyo SK shows"
-msgstr "Voyo (SK) - porady, serialy, filmy >"
+msgstr "Voyo SK shows"
 
 # --- Welcome setup (v0.0.72) ---
 
 msgctxt "#30200"
 msgid "Welcome to KlempCinema"
-msgstr "Vítej v KlempCinema"
+msgstr "Welcome to KlempCinema"
 
 msgctxt "#30201"
 msgid "Webshare account is required to play videos. Enter your Webshare username and password now. You can skip this dialog and fill credentials later in addon settings."
-msgstr "Pro přehrávání videí je potřeba Webshare účet (VIP). Zadej nyní své Webshare uživatelské jméno a heslo. Dialog můžeš přeskočit a credentials vyplnit kdykoli později v Nastavení doplňku."
+msgstr "Webshare account is required to play videos. Enter your Webshare username and password now. You can skip this dialog and fill credentials later in addon settings."
 
 msgctxt "#30202"
 msgid "Enter account"
-msgstr "Zadat účet"
+msgstr "Enter account"
 
 msgctxt "#30203"
 msgid "Skip"
-msgstr "Přeskočit"
+msgstr "Skip"
 
 msgctxt "#30204"
 msgid "Webshare username"
-msgstr "Webshare uživatelské jméno"
+msgstr "Webshare username"
 
 msgctxt "#30205"
 msgid "Cancelled - fill the account in addon settings."
-msgstr "Zadání zrušeno - vyplň účet v Nastavení doplňku."
+msgstr "Cancelled - fill the account in addon settings."
 
 msgctxt "#30206"
 msgid "Webshare password"
-msgstr "Webshare heslo"
+msgstr "Webshare password"
 
 msgctxt "#30207"
 msgid "Save failed - fill the account in addon settings."
-msgstr "Chyba ukládání - vyplň účet v Nastavení doplňku."
+msgstr "Save failed - fill the account in addon settings."
 
 msgctxt "#30208"
 msgid "Verifying Webshare login..."
-msgstr "Ověřuji Webshare přihlášení..."
+msgstr "Verifying Webshare login..."
 
 msgctxt "#30209"
 msgid "Webshare login OK."
-msgstr "Webshare přihlášení OK."
+msgstr "Webshare login OK."
 
 msgctxt "#30210"
 msgid "Webshare: login failed"
-msgstr "Webshare: přihlášení selhalo"
+msgstr "Webshare: login failed"
 
 msgctxt "#30211"
 msgid "Login failed. Check username and password in addon settings (Webshare account) and try again."
-msgstr "Přihlášení se nepovedlo. Zkontroluj jméno a heslo v Nastavení doplňku (Webshare účet) a zkus to znovu."
+msgstr "Login failed. Check username and password in addon settings (Webshare account) and try again."
 
 msgctxt "#30212"
 msgid "Enter password visibly or hidden?"
-msgstr "Chceš zadávat heslo skrytě (***), nebo viditelně? Doporučujeme VIDITELNĚ - uvidíš co píšeš a vyhneš se překlepu."
+msgstr "Enter password visibly or hidden?"
 
 msgctxt "#30213"
 msgid "Visible"
-msgstr "Viditelně"
+msgstr "Visible"
 
 msgctxt "#30214"
 msgid "Hidden"
-msgstr "Skrytě"
+msgstr "Hidden"
 
 # --- Donate (v0.0.73) ---
 
 msgctxt "#30220"
 msgid "Send a gift to the author (voluntary)"
-msgstr "Poslat autorovi dar (dobrovolné)"
+msgstr "Send a gift to the author (voluntary)"
 
 msgctxt "#30221"
 msgid "Show QR code"
-msgstr "Zobrazit QR kód"
+msgstr "Show QR code"
 
 msgctxt "#30222"
 msgid "Show QR code for scanning in your banking app?"
-msgstr "Zobrazit QR kód pro naskenování v bankovní aplikaci?"
+msgstr "Show QR code for scanning in your banking app?"
 
 msgctxt "#30223"
 msgid "Show QR"
-msgstr "Zobrazit QR"
+msgstr "Show QR"
 
 msgctxt "#30224"
 msgid "Close"
-msgstr "Zavřít"
+msgstr "Close"
 
 # v0.0.79: Refresh icons (Kodi texture cache invalidate)
 msgctxt "#30230"
 msgid "Refresh plugin icons (after upgrade)"
-msgstr "Obnovit ikony pluginu (po upgrade)"
+msgstr "Refresh plugin icons (after upgrade)"
 
 msgctxt "#30231"
 msgid "Icons refreshed - if still old, uninstall + reinstall the plugin."
-msgstr "Ikony obnoveny - pokud nestačí, odinstaluj a znovu nainstaluj plugin."
+msgstr "Icons refreshed - if still old, uninstall + reinstall the plugin."
 
 # v0.0.80: Donate dialog text strings (drive hardcoded v cestine, ted localizable)
 msgctxt "#30240"
 msgid "GIFT FOR THE AUTHOR"
-msgstr "DAR AUTOROVI"
+msgstr "GIFT FOR THE AUTHOR"
 
 msgctxt "#30241"
 msgid "IBAN"
@@ -353,106 +353,106 @@ msgstr "IBAN"
 
 msgctxt "#30242"
 msgid "Currency"
-msgstr "Měna"
+msgstr "Currency"
 
 msgctxt "#30243"
 msgid "Message"
-msgstr "Zpráva"
+msgstr "Message"
 
 msgctxt "#30244"
 msgid "Gift KlempCinema"
-msgstr "Dar KlempCinema"
+msgstr "Gift KlempCinema"
 
 msgctxt "#30245"
 msgid "How to send:"
-msgstr "Jak poslat:"
+msgstr "How to send:"
 
 msgctxt "#30246"
 msgid "  1) Open your banking app"
-msgstr "  1) Otevři bankovní aplikaci"
+msgstr "  1) Open your banking app"
 
 msgctxt "#30247"
 msgid "  2) Pay -> Scan QR code"
-msgstr "  2) Zaplatit → Naskenovat QR"
+msgstr "  2) Pay -> Scan QR code"
 
 msgctxt "#30248"
 msgid "  3) Scan the QR from Kodi screen"
-msgstr "  3) Naskenuj QR z obrazovky Kodi"
+msgstr "  3) Scan the QR from Kodi screen"
 
 msgctxt "#30249"
 msgid "  4) Enter amount and send"
-msgstr "  4) Zadej částku a odešli"
+msgstr "  4) Enter amount and send"
 
 msgctxt "#30250"
 msgid "Thanks! - Bicalorman"
-msgstr "Díky! - Bicalorman"
+msgstr "Thanks! - Bicalorman"
 
 # v0.0.80: Login error strings (Webshare auth failures)
 msgctxt "#30260"
 msgid "Webshare: WRONG PASSWORD"
-msgstr "Webshare: ŠPATNÉ HESLO"
+msgstr "Webshare: WRONG PASSWORD"
 
 msgctxt "#30261"
 msgid "Password does not match account '{u}'."
-msgstr "Heslo neodpovídá účtu '{u}'."
+msgstr "Password does not match account '{u}'."
 
 msgctxt "#30262"
 msgid "Possible causes: password typo, password changed on webshare.cz, extra/missing space or Caps Lock."
-msgstr "Možné příčiny: překlep v hesle, heslo bylo změněno na webshare.cz, chybí nebo přebývá mezera/Caps Lock."
+msgstr "Possible causes: password typo, password changed on webshare.cz, extra/missing space or Caps Lock."
 
 msgctxt "#30263"
 msgid "Webshare: USER DOES NOT EXIST"
-msgstr "Webshare: NEEXISTUJÍCÍ UŽIVATEL"
+msgstr "Webshare: USER DOES NOT EXIST"
 
 msgctxt "#30264"
 msgid "Account '{u}' does not exist on Webshare. Check the username - it must match exactly the one used to log in at webshare.cz (including diacritics and case)."
-msgstr "Účet '{u}' na Webshare neexistuje. Zkontroluj uživatelské jméno - musí být přesně stejné jako při přihlášení na webshare.cz (včetně diakritiky a velkých/malých písmen)."
+msgstr "Account '{u}' does not exist on Webshare. Check the username - it must match exactly the one used to log in at webshare.cz (including diacritics and case)."
 
 msgctxt "#30265"
 msgid "Missing username or password in settings. Run setup again (Addons > KlempCinema)."
-msgstr "Chybí jméno nebo heslo v nastavení. Spusť setup znovu (Doplňky > KlempCinema)."
+msgstr "Missing username or password in settings. Run setup again (Addons > KlempCinema)."
 
 msgctxt "#30266"
 msgid "Webshare did not respond as expected."
-msgstr "Webshare nereagoval očekávaně."
+msgstr "Webshare did not respond as expected."
 
 msgctxt "#30267"
 msgid "Check internet connection and try again via Tools > Test Webshare login."
-msgstr "Zkontroluj internet a zkus to znovu přes Nástroje > Otestovat Webshare login."
+msgstr "Check internet connection and try again via Tools > Test Webshare login."
 
 msgctxt "#32116"
 msgid "Remember search history (10 last queries)"
-msgstr "Pamatovat historii hledání (10 posledních dotazů)"
+msgstr "Remember search history (10 last queries)"
 
 # --- Settings ---
 
 msgctxt "#32100"
 msgid "Webshare account"
-msgstr "Webshare účet"
+msgstr "Webshare account"
 
 msgctxt "#32101"
 msgid "Username / e-mail"
-msgstr "Uživatelské jméno / e-mail"
+msgstr "Username / e-mail"
 
 msgctxt "#32102"
 msgid "Password"
-msgstr "Heslo"
+msgstr "Password"
 
 msgctxt "#32103"
 msgid "Session token (internal)"
-msgstr "Token relace (interní)"
+msgstr "Session token (internal)"
 
 msgctxt "#32104"
 msgid "Built-in Webshare credentials"
-msgstr "Plugin má vestavěné Webshare přihlášení - není nutné nic vyplňovat. Pokud chceš vlastní účet, vyplň jméno a heslo níže (vlastní mají přednost)."
+msgstr "Built-in Webshare credentials"
 
 msgctxt "#32110"
 msgid "Playback"
-msgstr "Přehrávání"
+msgstr "Playback"
 
 msgctxt "#32111"
 msgid "Automatically play highest quality (skip picker)"
-msgstr "Automaticky přehrát nejvyšší kvalitu (přeskočit dialog)"
+msgstr "Automatically play highest quality (skip picker)"
 
 msgctxt "#32112"
 msgid "Default OFF: ukáže dialog s výběrem kvality. Zapnuto = klik na film hned přehraje nejlepší dostupnou (4K > 1080p > 720p > ...). Tip: pro klasický picker UX nech vypnuto."
@@ -460,143 +460,143 @@ msgstr "Default OFF: ukáže dialog s výběrem kvality. Zapnuto = klik na film 
 
 msgctxt "#32113"
 msgid "(unused, kept for compatibility)"
-msgstr "(nepoužito, zachováno pro kompatibilitu)"
+msgstr "(unused, kept for compatibility)"
 
 msgctxt "#32114"
 msgid "(unused, kept for compatibility)"
-msgstr "(nepoužito, zachováno pro kompatibilitu)"
+msgstr "(unused, kept for compatibility)"
 
 msgctxt "#32115"
 msgid "Items per page"
-msgstr "Položek na stránku"
+msgstr "Items per page"
 
 msgctxt "#32120"
 msgid "Category queries"
-msgstr "Dotazy rubrik"
+msgstr "Category queries"
 
 msgctxt "#32121"
 msgid "Movies query"
-msgstr "Dotaz pro Filmy"
+msgstr "Movies query"
 
 msgctxt "#32122"
 msgid "TV Shows query"
-msgstr "Dotaz pro Seriály"
+msgstr "TV Shows query"
 
 msgctxt "#32123"
 msgid "Latest query"
-msgstr "Dotaz pro Novinky"
+msgstr "Latest query"
 
 msgctxt "#32124"
 msgid "Newly dubbed movies query"
-msgstr "Dotaz pro Nově dabované filmy"
+msgstr "Newly dubbed movies query"
 
 msgctxt "#32125"
 msgid "Newly dubbed TV shows query"
-msgstr "Dotaz pro Nově dabované seriály"
+msgstr "Newly dubbed TV shows query"
 
 msgctxt "#32126"
 msgid "Fairy tales query"
-msgstr "Pohádky: dotaz (prázdné = multi-query; více oddělit |)"
+msgstr "Fairy tales query"
 
 msgctxt "#32127"
 msgid "Latest: minimum release year"
-msgstr "Novinky: minimální rok vydání (0 = bez filtru)"
+msgstr "Latest: minimum release year"
 
 msgctxt "#32128"
 msgid "Latest filter info"
-msgstr "Novinky automaticky preferují aktuální rok. Filmy starší než zde uvedený rok se odfiltrují (filmy bez TMDB matche projdou vždy)."
+msgstr "Latest filter info"
 
 msgctxt "#32129"
 msgid "Newly dubbed: minimum release year"
-msgstr "Filmy novinky dabované: minimální rok vydání (0 = bez filtru)"
+msgstr "Newly dubbed: minimum release year"
 
 msgctxt "#32190"
 msgid "Animated movies: minimum quality"
-msgstr "Filmy animované CZ/SK: minimální kvalita"
+msgstr "Animated movies: minimum quality"
 
 # --- TMDB metadata ---
 
 msgctxt "#32130"
 msgid "TMDB metadata (posters, ratings)"
-msgstr "TMDB metadata (plakáty, hodnocení)"
+msgstr "TMDB metadata (posters, ratings)"
 
 msgctxt "#32131"
 msgid "Enable TMDB enrichment"
-msgstr "Zapnout TMDB obohacení"
+msgstr "Enable TMDB enrichment"
 
 msgctxt "#32132"
 msgid "TMDB API key (free at themoviedb.org)"
-msgstr "TMDB API klíč (nepovinné - vestavěný klíč funguje out-of-the-box. Vyplň jen pokud chceš vlastní quota / V4 Bearer)"
+msgstr "TMDB API key (free at themoviedb.org)"
 
 msgctxt "#32133"
 msgid "TMDB language"
-msgstr "Jazyk TMDB metadat"
+msgstr "TMDB language"
 
 msgctxt "#32134"
 msgid "Czech (cs-CZ)"
-msgstr "Čeština (cs-CZ)"
+msgstr "Czech (cs-CZ)"
 
 msgctxt "#32135"
 msgid "English (en-US)"
-msgstr "Angličtina (en-US)"
+msgstr "English (en-US)"
 
 msgctxt "#32136"
 msgid "Slovak (sk-SK)"
-msgstr "Slovenština (sk-SK)"
+msgstr "Slovak (sk-SK)"
 
 msgctxt "#32137"
 msgid "Without API key the plugin works (no posters/ratings)."
-msgstr "Plugin má vestavěný TMDB klíč - plakáty a hodnocení fungují hned po instalaci. Vlastní klíč vyplň jen pokud chceš oddělené quota."
+msgstr "Without API key the plugin works (no posters/ratings)."
 
 msgctxt "#32138"
 msgid "Enable ČSFD fallback (scraping, no key needed)"
-msgstr "ČSFD fallback (scraping, bez API klíče)"
+msgstr "Enable ČSFD fallback (scraping, no key needed)"
 
 msgctxt "#32139"
 msgid "ČSFD is used as fallback when TMDB returns nothing."
-msgstr "ČSFD se použije, když TMDB nic nenajde. POZOR: ČSFD má často aktivní Cloudflare anti-bot ochranu, která plugin blokuje - v takovém případě plakáty bere jen TMDB. Stav uvidíš v notifikaci po otevření menu."
+msgstr "ČSFD is used as fallback when TMDB returns nothing."
 
 msgctxt "#32180"
 msgid "Skip enrichment (very fast browsing, no posters/ratings)"
-msgstr "Vypnout obohacování (rychlé procházení, bez plakátů/hodnocení)"
+msgstr "Skip enrichment (very fast browsing, no posters/ratings)"
 
 # --- Řazení & filtrace ---
 
 msgctxt "#32140"
 msgid "Sorting and filtering"
-msgstr "Řazení a filtrace"
+msgstr "Sorting and filtering"
 
 msgctxt "#32141"
 msgid "Movies sort"
-msgstr "Řazení Filmů"
+msgstr "Movies sort"
 
 msgctxt "#32142"
 msgid "TV Shows sort"
-msgstr "Řazení Seriálů"
+msgstr "TV Shows sort"
 
 msgctxt "#32143"
 msgid "Newly dubbed sort"
-msgstr "Řazení Nově dabované"
+msgstr "Newly dubbed sort"
 
 msgctxt "#32144"
 msgid "Fairy tales sort"
-msgstr "Řazení Pohádek"
+msgstr "Fairy tales sort"
 
 msgctxt "#32145"
 msgid "Year from"
-msgstr "Rok od"
+msgstr "Year from"
 
 msgctxt "#32146"
 msgid "Year to"
-msgstr "Rok do"
+msgstr "Year to"
 
 msgctxt "#32147"
 msgid "Fairy tales: only Czech/Slovak dubbed"
-msgstr "Pohádky: jen české/slovenské scény"
+msgstr "Fairy tales: only Czech/Slovak dubbed"
 
 msgctxt "#32148"
 msgid "Show only items with poster (filter unknown rips)"
-msgstr "Zobrazit jen položky s plakátem (filtruje neznámé ripy)"
+msgstr "Show only items with poster (filter unknown rips)"
 
 msgctxt "#32149"
 msgid "Default OFF: ukáže VŠECHEN obsah z Webshare. Položky bez TMDB/ČSFD plakátu dostanou hezký typový placeholder (movie/series 'no poster available'). Duplicity se sloučí. Pokud chceš jen výsledky se skutečným plakátem, zapni."
@@ -606,74 +606,74 @@ msgstr "Default OFF: ukáže VŠECHEN obsah z Webshare. Položky bez TMDB/ČSFD 
 
 msgctxt "#32150"
 msgid "Popularity > Year > Quality"
-msgstr "Popularita > Rok > Kvalita"
+msgstr "Popularity > Year > Quality"
 
 msgctxt "#32151"
 msgid "Year (newest first)"
-msgstr "Rok (od nejnovějších)"
+msgstr "Year (newest first)"
 
 msgctxt "#32152"
 msgid "Quality (best first)"
-msgstr "Kvalita (od nejlepší)"
+msgstr "Quality (best first)"
 
 msgctxt "#32153"
 msgid "Rating (ČSFD-like)"
-msgstr "Hodnocení (ČSFD-like)"
+msgstr "Rating (ČSFD-like)"
 
 msgctxt "#32154"
 msgid "Default (Webshare)"
-msgstr "Bez třídění (Webshare)"
+msgstr "Default (Webshare)"
 
 msgctxt "#32155"
 msgid "Popularity (Netflix/IMDB)"
-msgstr "Popularita (Netflix/IMDB)"
+msgstr "Popularity (Netflix/IMDB)"
 
 msgctxt "#32156"
 msgid "Quality + Popularity"
-msgstr "Kvalita + Popularita"
+msgstr "Quality + Popularity"
 
 # --- České titulky (OpenSubtitles) ---
 
 msgctxt "#32160"
 msgid "Czech subtitles (OpenSubtitles.org)"
-msgstr "České titulky (OpenSubtitles.org – bez API klíče)"
+msgstr "Czech subtitles (OpenSubtitles.org)"
 
 msgctxt "#32161"
 msgid "Auto-load subtitles when playing"
-msgstr "Automaticky stahovat titulky při přehrávání"
+msgstr "Auto-load subtitles when playing"
 
 msgctxt "#32162"
 msgid "Only for non-dubbed movies"
-msgstr "Jen pro nedabované filmy/epizody"
+msgstr "Only for non-dubbed movies"
 
 msgctxt "#32163"
 msgid "User-Agent (registered with OpenSubtitles)"
-msgstr "User-Agent (default: XBMC_Subtitles_v1)"
+msgstr "User-Agent (registered with OpenSubtitles)"
 
 msgctxt "#32164"
 msgid "OpenSubtitles.org username"
-msgstr "OpenSubtitles.org jméno (z opensubtitles.org)"
+msgstr "OpenSubtitles.org username"
 
 msgctxt "#32165"
 msgid "OpenSubtitles.org password"
-msgstr "OpenSubtitles.org heslo"
+msgstr "OpenSubtitles.org password"
 
 msgctxt "#32166"
 msgid "Subtitle language"
-msgstr "Jazyk titulků"
+msgstr "Subtitle language"
 
 msgctxt "#32167"
 msgid "Czech (cs)"
-msgstr "Čeština (cs)"
+msgstr "Czech (cs)"
 
 msgctxt "#32168"
 msgid "Slovak (sk)"
-msgstr "Slovenština (sk)"
+msgstr "Slovak (sk)"
 
 msgctxt "#32169"
 msgid "English (en)"
-msgstr "Angličtina (en)"
+msgstr "English (en)"
 
 msgctxt "#32170"
 msgid "Free login on opensubtitles.org is enough (no API key needed)."
-msgstr "Stačí běžné přihlášení na opensubtitles.org (žádný API klíč)."
+msgstr "Free login on opensubtitles.org is enough (no API key needed)."

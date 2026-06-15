@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.79"
+       version="0.0.80"
        provider-name="Bicalorman">
 
     <requires>
@@ -26,7 +26,61 @@
         <website></website>
         <email></email>
         <news>
+v0.0.80 - i18n FIX: ENGLISH FALLBACK PRO WELCOME + DONATE
+
+OPRAVA: Hardcoded ceske texty ve welcome a donate dialogu
+- Uzivatel hlasi: "fallback preklad idealne v anglictine - kdyz si
+  nainstalujes kodi tak ho mas vacsinou hned v anglictine. Iba welcome
+  a dar mas harcoded texty, inde pouzivas preklady."
+- ROOT CAUSE: V router.py byl welcome flow a hlavne donate dialog
+  napsany s ceskymi _tr_safe(id, "CESKY FALLBACK") - pokud
+  uzivatel mel Kodi v EN bez naseho cs_cz prekladu, videl
+  cesky text.
+- Donate dialog mel info_lines (13 radek IBAN+navod) cele hardcoded
+  v cestine bez _tr() volani.
+
+OPRAVA (v0.0.80):
+- Pridan resource.language.en_gb/strings.po (kompletni EN preklad)
+- Donate dialog info_lines nyni pouzivaji _tr_safe() klice
+  30240-30250 (preklady IBAN/Currency/Message/Send steps)
+- Welcome flow fallback texty zmeneny z CZ na EN (matchuji msgid)
+- Login error texty (WRONG PASSWORD / USER NOT EXIST atd.)
+  nyni pouzivaji klice 30260-30267, neni vice ASCII-only cestina
+  hardcoded ve zdrojaku
+
+DOPAD:
+- Kodi v EN: vsechny texty plne anglicky (z en_gb strings.po
+  nebo z msgid fallback)
+- Kodi v CZ: vsechny texty cesky (z cs_cz strings.po)
+- Kodi v jinem jazyce: anglicky fallback z msgid (drive nektery
+  texty cesky, ted vse EN)
+
+---
+
 v0.0.79 - RYCHLEJSI SHUTDOWN + UI BUG U DARU + ZVYRAZNENI DARU V MENU
+
+OPRAVA: Kodi texture cache - stara ikona po upgrade
+- User: "po znovuspusteni se plakat KC zmeni na puvodni fialovy a
+  neni tam ta kamera jak ma byt"
+- ROOT CAUSE: Kodi cachuje icon.png v Textures DB pri prvni instalaci.
+  Pri upgrade ZIP obsahuje novou ikonu, ale Kodi ji nepouzije
+  (cache hit na puvodni cestu).
+
+OPRAVA (v0.0.79):
+- _check_post_upgrade(): pri prvnim spusteni nove verze plugin
+  detekuje upgrade (last_seen_version != current) a zavola
+  xbmc.executebuiltin('UpdateLocalAddons') - Kodi znovu nacte
+  addon manifest a invaliduje texture cache.
+- Nastroje > "Obnovit ikony pluginu" - manualni button pro pripady
+  kdy auto-refresh nestaci. Vola UpdateLocalAddons + ReloadSkin.
+
+POKUD ANI POMOC AUTO-REFRESH NESTACI:
+- Odinstaluj plugin (Doplnky > KlempCinema > Odinstalovat)
+- Restartuj Kodi
+- Znovu nainstaluj ZIP - Kodi cache se kompletne preskupy
+  (Webshare credentials a watched zustanou - jsou v userdata/addon_data)
+
+---
 
 OPRAVA: Flash + uvaznuta mys po startu videa
 - User: "po spusteni filmu film problikne a mys to nepusti pod spodni

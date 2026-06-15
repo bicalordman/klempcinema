@@ -584,16 +584,15 @@ def _welcome_setup_webshare() -> bool:
     try:
         dlg = xbmcgui.Dialog()
         cont = dlg.yesno(
-            heading=_tr_safe(30200, "Vítej v KlempCinema"),
+            heading=_tr_safe(30200, "Welcome to KlempCinema"),
             message=_tr_safe(
                 30201,
-                "Pro fungování pluginu je potřeba Webshare účet (VIP).\n"
-                "Zadej nyní své Webshare uživatelské jméno a heslo.\n\n"
-                "Pokud účet nemáš, můžeš dialog přeskočit a vyplnit\n"
-                "credentials kdykoli později v Nastavení doplňku."
+                "Webshare account is required to play videos. Enter your "
+                "Webshare username and password now. You can skip this dialog "
+                "and fill credentials later in addon settings."
             ),
-            yeslabel=_tr_safe(30202, "Zadat účet"),
-            nolabel=_tr_safe(30203, "Přeskočit"),
+            yeslabel=_tr_safe(30202, "Enter account"),
+            nolabel=_tr_safe(30203, "Skip"),
         )
     except Exception:  # noqa: BLE001
         cont = False
@@ -601,12 +600,12 @@ def _welcome_setup_webshare() -> bool:
     if not cont:
         return False
 
-    # ---- Jméno ------------------------------------------------------------
-    user = _ask_input(_tr_safe(30204, "Webshare jméno"), hidden=False)
+    # ---- Username ---------------------------------------------------------
+    user = _ask_input(_tr_safe(30204, "Webshare username"), hidden=False)
     if not user.strip():
         try:
             ui.show_notification(
-                _tr_safe(30205, "Zadání zrušeno - vyplň účet v Nastavení."),
+                _tr_safe(30205, "Cancelled - fill the account in addon settings."),
                 time_ms=4000,
             )
         except Exception:  # noqa: BLE001
@@ -620,26 +619,24 @@ def _welcome_setup_webshare() -> bool:
     # preklepu se chyba nezobrazi - radej se na to zeptame.
     try:
         hide_pwd = xbmcgui.Dialog().yesno(
-            _tr_safe(30200, "Vítej v KlempCinema"),
+            _tr_safe(30200, "Welcome to KlempCinema"),
             _tr_safe(
                 30212,
-                "Chceš zadávat heslo skrytě (***), nebo viditelně?\n\n"
-                "Doporučujeme VIDITELNĚ - uvidíš co píšeš a vyhneš se "
-                "překlepu. Nikdo kolem tě stejně nezná své Webshare heslo."
+                "Enter password visibly or hidden? We recommend VISIBLE - "
+                "you can see what you are typing and avoid typos."
             ),
-            yeslabel=_tr_safe(30213, "Viditelně"),
-            nolabel=_tr_safe(30214, "Skrytě"),
+            yeslabel=_tr_safe(30213, "Visible"),
+            nolabel=_tr_safe(30214, "Hidden"),
         )
-        # Yes => viditelne (hidden=False); No => skryte (hidden=True)
         hidden_input = not hide_pwd
     except Exception:  # noqa: BLE001
-        hidden_input = False  # fallback - radej viditelne
+        hidden_input = False
 
-    pwd = _ask_input(_tr_safe(30206, "Webshare heslo"), hidden=hidden_input)
+    pwd = _ask_input(_tr_safe(30206, "Webshare password"), hidden=hidden_input)
     if not pwd:
         try:
             ui.show_notification(
-                _tr_safe(30205, "Zadání zrušeno - vyplň účet v Nastavení."),
+                _tr_safe(30205, "Cancelled - fill the account in addon settings."),
                 time_ms=4000,
             )
         except Exception:  # noqa: BLE001
@@ -656,7 +653,7 @@ def _welcome_setup_webshare() -> bool:
         log.warning("Nepodařilo se uložit credentials: %s", exc)
         try:
             ui.show_notification(
-                _tr_safe(30207, "Chyba při ukládání. Vyplň účet v Nastavení."),
+                _tr_safe(30207, "Save failed - fill the account in addon settings."),
                 time_ms=5000,
             )
         except Exception:  # noqa: BLE001
@@ -672,8 +669,8 @@ def _welcome_setup_webshare() -> bool:
     try:
         progress = xbmcgui.DialogProgress()
         progress.create(
-            _tr_safe(30200, "Vítej v KlempCinema"),
-            _tr_safe(30208, "Ověřuji Webshare přihlášení..."),
+            _tr_safe(30200, "Welcome to KlempCinema"),
+            _tr_safe(30208, "Verifying Webshare login..."),
         )
     except Exception:  # noqa: BLE001
         progress = None
@@ -697,7 +694,7 @@ def _welcome_setup_webshare() -> bool:
             pass
         try:
             ui.show_notification(
-                _tr_safe(30209, "Webshare přihlášení OK."),
+                _tr_safe(30209, "Webshare login OK."),
                 time_ms=3500,
             )
         except Exception:  # noqa: BLE001
@@ -714,38 +711,46 @@ def _welcome_setup_webshare() -> bool:
     message = (diag.get("message") or "")
     if code == "AUTH_LOGIN_INVALID_PASSWORD":
         diag_text = (
-            "Webshare: SPATNE HESLO\n\n"
-            "Heslo neodpovida uctu '{u}'.\n\n"
-            "Mozne priciny:\n"
-            "  - preklep v hesle (zkus zadat znovu viditelne)\n"
-            "  - heslo bylo zmeneno na webshare.cz\n"
-            "  - chybi nebo prebyva mezera/Caps Lock\n"
-        ).format(u=user)
+            _tr_safe(30260, "Webshare: WRONG PASSWORD") + "\n\n"
+            + _tr_safe(30261, "Password does not match account '{u}'.").format(u=user)
+            + "\n\n"
+            + _tr_safe(
+                30262,
+                "Possible causes: password typo, password changed on "
+                "webshare.cz, extra/missing space or Caps Lock."
+            )
+        )
     elif code == "AUTH_LOGIN_INVALID_USER":
         diag_text = (
-            "Webshare: NEEXISTUJICI UZIVATEL\n\n"
-            "Ucet '{u}' na Webshare neexistuje.\n\n"
-            "Zkontroluj uzivatelske jmeno - musi byt presne stejne\n"
-            "jako pri prihlaseni na webshare.cz (vcetne diakritiky\n"
-            "a velkych/malych pismen)."
-        ).format(u=user)
+            _tr_safe(30263, "Webshare: USER DOES NOT EXIST") + "\n\n"
+            + _tr_safe(
+                30264,
+                "Account '{u}' does not exist on Webshare. Check the username "
+                "- it must match exactly the one used to log in at webshare.cz "
+                "(including diacritics and case)."
+            ).format(u=user)
+        )
     elif code == "MISSING_CREDENTIALS":
-        diag_text = (
-            "Chybi jmeno nebo heslo v nastaveni.\n"
-            "Spust setup znovu (Doplnky > KlempCinema)."
+        diag_text = _tr_safe(
+            30265,
+            "Missing username or password in settings. Run setup again "
+            "(Addons > KlempCinema)."
         )
     else:
         diag_text = (
-            "Webshare nereagoval ocekavane.\n\n"
-            "kod:    {code}\n"
-            "zprava: {msg}\n\n"
-            "Zkontroluj internet a zkus to znovu pres\n"
-            "Nastroje > Otestovat Webshare login."
-        ).format(code=code, msg=message)
+            _tr_safe(30266, "Webshare did not respond as expected.") + "\n\n"
+            + f"code:    {code}\n"
+            + f"message: {message}\n\n"
+            + _tr_safe(
+                30267,
+                "Check internet connection and try again via Tools > "
+                "Test Webshare login."
+            )
+        )
 
     try:
         xbmcgui.Dialog().ok(
-            _tr_safe(30210, "Webshare: login selhal"),
+            _tr_safe(30210, "Webshare: login failed"),
             diag_text,
         )
     except Exception:  # noqa: BLE001
@@ -915,8 +920,47 @@ def view_tools(handle: int, base_url: str) -> None:
         (30070, "clear_cache",    {}, icon),     # Smazat cache
         (30101, "watched_clear",  {}, icon),     # Smazat historii sledovani
         (30115, "search_history_clear", {}, icon),  # Smazat historii hledani
+        # v0.0.79: Manualni refresh Kodi texture cache (icon/fanart)
+        # pro pripady kdy auto-refresh po upgrade nestaci.
+        (30230, "refresh_icons",  {}, icon),     # Obnovit ikony pluginu
     ]
     _render_menu(handle, base_url, menu)
+
+
+def view_refresh_icons(handle: int, base_url: str, params: dict) -> None:
+    """v0.0.79: Vynuti Kodi aby invalidoval texture cache pro tento addon.
+
+    Pouziti: kdyz user vidi starou ikonu po upgrade (Kodi cachuje
+    icon.png v Textures DB) a auto-refresh v _check_post_upgrade
+    nepomohl. Volat z Nastroje > Obnovit ikony pluginu.
+    """
+    try:
+        import xbmc  # type: ignore
+        # Nejprve invaliduj last_seen_version aby _check_post_upgrade
+        # priste znovu refreshnul (= force re-trigger).
+        try:
+            _addon().setSetting("last_seen_version", "")
+        except Exception:  # noqa: BLE001
+            pass
+        # UpdateLocalAddons: znovu nacte addon manifest a invaliduje
+        # texture cache. ReloadSkin force-redraw UI.
+        xbmc.executebuiltin('UpdateLocalAddons')
+        xbmc.sleep(200)
+        xbmc.executebuiltin('ReloadSkin()')
+        try:
+            ui.show_notification(
+                _tr_safe(30231,
+                         "Ikony obnoveny - pokud nestaci, odinstaluj a znovu nainstaluj plugin."),
+                time_ms=5000,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("refresh_icons selhal: %s", exc)
+    try:
+        xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def view_donate(handle: int, base_url: str, params: dict) -> None:
@@ -939,20 +983,22 @@ def view_donate(handle: int, base_url: str, params: dict) -> None:
 
     iban_pretty = "CZ95 5500 0000 0010 2685 1852"
 
+    # v0.0.80: lokalizovany text - drive hardcoded v cestine, ted bere
+    # preklady ze strings.po (cz pro CZ Kodi, EN pro anglicky Kodi atd.)
     info_lines = [
-        "DAR AUTOROVI",
+        _tr_safe(30240, "GIFT FOR THE AUTHOR"),
         "",
-        f"IBAN:    {iban_pretty}",
-        "Měna:    CZK",
-        "Zpráva:  Dar KlempCinema",
+        f"{_tr_safe(30241, 'IBAN')}:    {iban_pretty}",
+        f"{_tr_safe(30242, 'Currency')}:    CZK",
+        f"{_tr_safe(30243, 'Message')}:    {_tr_safe(30244, 'Gift KlempCinema')}",
         "",
-        "Jak poslat:",
-        "  1) Otevři bankovní aplikaci",
-        "  2) Zaplatit → Naskenovat QR",
-        "  3) Naskenuj QR z Kodi",
-        "  4) Zadej částku a odešli",
+        _tr_safe(30245, "How to send:"),
+        _tr_safe(30246, "  1) Open your banking app"),
+        _tr_safe(30247, "  2) Pay -> Scan QR code"),
+        _tr_safe(30248, "  3) Scan the QR from Kodi screen"),
+        _tr_safe(30249, "  4) Enter amount and send"),
         "",
-        "Díky! - Bicalorman",
+        _tr_safe(30250, "Thanks! - Bicalorman"),
     ]
     info_text = "\n".join(info_lines)
 
@@ -964,18 +1010,18 @@ def view_donate(handle: int, base_url: str, params: dict) -> None:
     try:
         dlg = xbmcgui.Dialog()
         dlg.textviewer(
-            _tr_safe(30220, "Poslat autorovi dar (dobrovolné)"),
+            _tr_safe(30220, "Send a gift to the author (voluntary)"),
             info_text,
         )
         if os.path.exists(qr_path):
             show_qr_requested = bool(dlg.yesno(
-                _tr_safe(30221, "Zobrazit QR kód"),
+                _tr_safe(30221, "Show QR code"),
                 _tr_safe(
                     30222,
-                    "Zobrazit QR kód pro naskenování v bankovní aplikaci?"
+                    "Show QR code for scanning in your banking app?"
                 ),
-                yeslabel=_tr_safe(30223, "Zobrazit QR"),
-                nolabel=_tr_safe(30224, "Zavřít"),
+                yeslabel=_tr_safe(30223, "Show QR"),
+                nolabel=_tr_safe(30224, "Close"),
             ))
     except Exception as exc:  # noqa: BLE001
         log.warning("view_donate dialog selhal: %s", exc)
@@ -998,8 +1044,8 @@ def view_donate(handle: int, base_url: str, params: dict) -> None:
             log.warning("ShowPicture selhal: %s", exc)
             try:
                 xbmcgui.Dialog().ok(
-                    _tr_safe(30220, "Poslat autorovi dar (dobrovolné)"),
-                    f"QR obrazek: {qr_path}",
+                    _tr_safe(30220, "Send a gift to the author (voluntary)"),
+                    f"QR: {qr_path}",
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -3453,7 +3499,53 @@ _ACTIONS = {
     "voyo_section":          view_voyo_section,       # v0.0.67
     "voyo_category":         view_voyo_category,      # v0.0.67
     "donate":                view_donate,             # v0.0.73
+    "refresh_icons":         view_refresh_icons,      # v0.0.79
 }
+
+
+def _check_post_upgrade() -> None:
+    """v0.0.79: Pri prvnim spusteni nove verze pluginu vynuti Kodi
+    aby refresh interni texture cache (icon, fanart) a addon metadata.
+
+    Problem (user report v0.0.79):
+        Po upgrade pluginu Kodi cachuje stary icon.png v Texture DB
+        (Textures13.db). Pri zobrazeni addonu Kodi pouzije cached
+        bitmapu mistgo aby precetl novy soubor z disku. User vidi
+        starou ikonu i kdyz ZIP obsahuje novou.
+
+    Reseni:
+        Detekce upgrade pomoci 'last_seen_version' settings. Kdyz
+        aktualni verze != ulozena, plugin zavola Kodi builtins ktere
+        vynuti reload addon metadata + skin (= cache invalidace pro
+        ikony tohoto pluginu).
+
+    Idempotentni - bezi jen jednou na verzi.
+    """
+    try:
+        addon = _addon()
+        current_ver = addon.getAddonInfo("version") or ""
+        last_ver = addon.getSetting("last_seen_version") or ""
+        if not current_ver or current_ver == last_ver:
+            return
+
+        log.info("Detekovan upgrade pluginu %s -> %s, refreshuji Kodi cache",
+                 last_ver or "(prvni spusteni)", current_ver)
+
+        try:
+            import xbmc  # type: ignore
+            # UpdateLocalAddons: Kodi znovu nacte addon manifest z disku,
+            # vcetne icon/fanart cest. Texture cache pro tento addon
+            # je invalidovana.
+            xbmc.executebuiltin('UpdateLocalAddons')
+        except Exception as exc:  # noqa: BLE001
+            log.debug("UpdateLocalAddons selhalo: %s", exc)
+
+        try:
+            addon.setSetting("last_seen_version", current_ver)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("setSetting last_seen_version selhalo: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("_check_post_upgrade selhalo: %s", exc)
 
 
 def route(params: Dict[str, str]) -> None:
@@ -3464,6 +3556,11 @@ def route(params: Dict[str, str]) -> None:
     # sleduje xbmc.Monitor a pri Kodi abortu signaluje vsem moduly aby
     # se ukoncily ihned bez cekani na network timeouty.
     _shutdown.start()
+
+    # v0.0.79: Pri prvnim spusteni nove verze refresh Kodi texture cache,
+    # aby user videl spravne icon/fanart hned po upgrade (bez nutnosti
+    # uninstall + reinstall).
+    _check_post_upgrade()
 
     action = (params.get("action") or "root").lower()
     log.debug("router.route(action=%s, params=%s)", action, params)
