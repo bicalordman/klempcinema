@@ -36,6 +36,28 @@ def _addon_assets():
         return "", ""
 
 
+def _genres_display(item: Dict[str, Any]) -> str:
+    """v0.0.83: Lokalizované žánry z TMDB (max 4 pro přehlednost řádku)."""
+    names = item.get("genre_names")
+    if names:
+        parts = [str(n) for n in names[:4] if n]
+        return ", ".join(parts)
+    gids = item.get("genre_ids") or []
+    if not gids:
+        return ""
+    try:
+        from . import tmdb as _tmdb
+        kind = ("tv" if (item.get("type") or "movie")
+                in ("series", "tvshow", "episode") else "movie")
+        resolved = _tmdb.genre_names_for_ids(gids, kind)
+        if resolved:
+            item["genre_names"] = resolved
+            return ", ".join(resolved[:4])
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 def _placeholder_poster_for(item: Dict[str, Any]) -> str:
     """
     v0.0.62: Vrati hezky per-item placeholder s NAZVEM uvnitr (pokud
@@ -51,7 +73,8 @@ def _placeholder_poster_for(item: Dict[str, Any]) -> str:
              or item.get("title")
              or item.get("base_title") or "")
     year = item.get("year")
-    return poster_placeholder.get_placeholder(title, year, item_type)
+    genres = _genres_display(item)
+    return poster_placeholder.get_placeholder(title, year, item_type, genres=genres or None)
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +156,7 @@ def add_video_item(
     csfd_rating = float(item.get("csfd_rating") or 0)
     csfd_pct = int(item.get("csfd_rating_pct") or 0)
     badges = item.get("badges") or []
+    genre_str = _genres_display(item)
 
     # ---- Label ----
     if label_override is not None:
@@ -143,7 +167,6 @@ def add_video_item(
         label = raw_title
         if year:
             label = f"{label} ({year})"
-        # Hvezdicka + TMDB rating (IMDB-style) - zlute
         if rating > 0:
             label = f"{label}  [COLOR FFFFD700]\u2605 {rating:.1f}[/COLOR]"
         # ČSFD rating jako BONUS vedle TMDB (v0.0.56) - cervene "ČSFD 78%"
@@ -171,6 +194,8 @@ def add_video_item(
         plot_parts.append("[B][CZ/SK dabing][/B]")
     elif subs_cz:
         plot_parts.append("[B][CZ titulky][/B]")
+    if genre_str:
+        plot_parts.append(f"[B]Žánr:[/B] {genre_str}")
     # TMDB + ČSFD hodnoceni vedle sebe (Sosáč-style) - v0.0.56.
     if rating > 0 and csfd_pct > 0:
         plot_parts.append(
@@ -196,6 +221,8 @@ def add_video_item(
         info["rating"] = rating
     if votes > 0:
         info["votes"] = str(votes)
+    if genre_str:
+        info["genre"] = genre_str
 
     if item_type == "series":
         info["mediatype"] = "tvshow"

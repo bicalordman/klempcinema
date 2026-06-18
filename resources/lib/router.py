@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 import time
 from typing import Any, Dict, List
 
@@ -2134,52 +2135,103 @@ def view_play_pick(handle, params):
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+def _add_discover_item(handle, base_url, meta: Dict[str, Any]) -> None:
+    """Prida jednu WS-overenou discovery polozku (film/serial)."""
+    title = meta.get("title") or meta.get("title_localized") or ""
+    year = meta.get("year")
+    item_type = meta.get("type") or "movie"
+    if not title:
+        return
+
+    if item_type == "series":
+        sname = meta.get("series_name") or title
+        url = ui.build_url(base_url, action="list_series_seasons", name=sname)
+        is_folder = True
+    elif meta.get("base_title") and meta.get("variant_idents"):
+        url = ui.build_url(
+            base_url, action="play_pick",
+            base=meta["base_title"], mode="movie",
+        )
+        is_folder = False
+    else:
+        url = ui.build_url(
+            base_url, action="tmdb_play_movie",
+            title=title,
+            year=str(year) if year else "",
+            tmdb_id=str(meta.get("tmdb_id") or ""),
+        )
+        is_folder = False
+
+    item_for_ui = {
+        "title":           title,
+        "title_localized": title,
+        "year":            year,
+        "plot":            meta.get("plot") or "",
+        "poster":          meta.get("poster") or "",
+        "fanart":          meta.get("fanart") or "",
+        "type":            item_type,
+        "rating":          float(meta.get("rating") or 0),
+        "votes":           int(meta.get("votes") or 0),
+        "popularity":      float(meta.get("popularity") or 0),
+        "dubbed":          bool(meta.get("dubbed")),
+        "base_title":      meta.get("base_title") or "",
+        "variant_idents":  meta.get("variant_idents") or [],
+        "tmdb_id":         meta.get("tmdb_id"),
+    }
+    ui.add_video_item(handle, item_for_ui, url, is_folder=is_folder)
+
+
+def _filter_tv_on_webshare(tv_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """v0.0.83: TV program / Voyo styl - jen polozky na Webshare."""
+    movie_entries: List[Dict[str, Any]] = []
+    series_entries: List[Dict[str, Any]] = []
+    for it in tv_items:
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        channel = (it.get("channel") or "").strip()
+        airtime = (it.get("time") or "").strip()
+        if channel and airtime:
+            extra = f"[B]V TV:[/B] {channel} v {airtime}"
+        elif channel:
+            extra = f"[B]V TV:[/B] {channel}"
+        else:
+            extra = ""
+        kind = it.get("kind") or "other"
+        entry: Dict[str, Any] = {
+            "title": title,
+            "year": it.get("year") or it.get("tmdb_year"),
+            "poster": it.get("tmdb_poster") or it.get("thumb") or "",
+            "fanart": it.get("tmdb_fanart") or "",
+            "plot": it.get("tmdb_plot") or it.get("plot") or "",
+            "rating": it.get("tmdb_rating") or 0,
+            "_extra_plot": extra,
+        }
+        if kind == "movie":
+            movie_entries.append(entry)
+        elif kind in ("series", "documentary"):
+            series_entries.append(entry)
+
+    out: List[Dict[str, Any]] = []
+    if movie_entries:
+        out.extend(api_webshare.filter_discovery_titles_on_webshare(
+            movie_entries, kind="movie"))
+    if series_entries:
+        out.extend(api_webshare.filter_discovery_titles_on_webshare(
+            series_entries, kind="series"))
+    return out
+
+
 def _render_tmdb_discover_list(handle, base_url, items, content="movies",
                                 close: bool = True):
     """
-    Zobrazí TMDB položky (z trending/discover).
+    Zobrazí položky z TMDB discover/trending PO WS filtru (v0.0.82).
 
-    - Film    -> action=tmdb_play_movie (vyhledá na WS, ukáže quality picker)
-    - Seriál  -> action=list_series_seasons (sezóny + epizody)
-
-    :param close: pokud True, uzavře directory hned (xbmcplugin.endOfDirectory).
-                  False = volající přidá ještě "Další strana..." a uzavře sám.
+    - Film s WS soubory -> play_pick (varianty uz v cache)
+    - Seriál s WS epizodami -> list_series_seasons
     """
     for meta in items:
-        title = meta.get("title") or ""
-        year = meta.get("year")
-        item_type = meta.get("type") or "movie"
-        if not title:
-            continue
-
-        if item_type == "series":
-            # Klik na seriál -> seznam sezón (přes existing flow)
-            url = ui.build_url(base_url, action="list_series_seasons",
-                               name=title)
-            is_folder = True
-        else:
-            # Klik na film -> přímý play přes WS lookup + quality picker
-            url = ui.build_url(base_url, action="tmdb_play_movie",
-                               title=title,
-                               year=str(year) if year else "",
-                               tmdb_id=str(meta.get("tmdb_id") or ""))
-            is_folder = False
-
-        item_for_ui = {
-            "title":           title,
-            "title_localized": title,
-            "year":            year,
-            "plot":            meta.get("plot") or "",
-            "poster":          meta.get("poster") or "",
-            "fanart":          meta.get("fanart") or "",
-            "type":            item_type,
-            "rating":          float(meta.get("rating") or 0),
-            "votes":           int(meta.get("votes") or 0),
-            "popularity":      float(meta.get("popularity") or 0),
-            "dubbed":          False,
-            "tmdb_id":         meta.get("tmdb_id"),
-        }
-        ui.add_video_item(handle, item_for_ui, url, is_folder=is_folder)
+        _add_discover_item(handle, base_url, meta)
 
     xbmcplugin.setContent(handle, content)
     if close:
@@ -2217,6 +2269,7 @@ def view_trending_movies(handle, base_url, params):
     window = params.get("window", "week")
     page = int(params.get("page", "1") or 1)
     items = tmdb_discover.trending_movies(window=window, page=page)
+    items = api_webshare.filter_tmdb_movies_on_webshare(items)
     _render_tmdb_discover_list(handle, base_url, items, content="movies",
                                 close=False)
     if items:
@@ -2231,6 +2284,7 @@ def view_trending_tv(handle, base_url, params):
     window = params.get("window", "week")
     page = int(params.get("page", "1") or 1)
     items = tmdb_discover.trending_tv(window=window, page=page)
+    items = api_webshare.filter_tmdb_series_on_webshare(items)
     _render_tmdb_discover_list(handle, base_url, items, content="tvshows",
                                 close=False)
     if items:
@@ -2376,6 +2430,7 @@ def view_platform_movies(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
         return
     items = tmdb_discover.platform_movies(pid, page=page, sort_by=sort)
+    items = api_webshare.filter_tmdb_movies_on_webshare(items)
     _render_tmdb_discover_list(handle, base_url, items, content="movies",
                                 close=False)
     if items:
@@ -2402,6 +2457,7 @@ def view_platform_tv(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
         return
     items = tmdb_discover.platform_tv(pid, page=page, sort_by=sort)
+    items = api_webshare.filter_tmdb_series_on_webshare(items)
     _render_tmdb_discover_list(handle, base_url, items, content="tvshows",
                                 close=False)
     if items:
@@ -2423,6 +2479,7 @@ def view_discover_movies(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
         return
     items = tmdb_discover.discover_movies(genre_id=genre_id, page=page)
+    items = api_webshare.filter_tmdb_movies_on_webshare(items)
     _render_tmdb_discover_list(handle, base_url, items, content="movies",
                                 close=False)
     if items:
@@ -2442,6 +2499,7 @@ def view_discover_tv(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
         return
     items = tmdb_discover.discover_tv(genre_id=genre_id, page=page)
+    items = api_webshare.filter_tmdb_series_on_webshare(items)
     _render_tmdb_discover_list(handle, base_url, items, content="tvshows",
                                 close=False)
     if items:
@@ -3090,8 +3148,8 @@ def view_list_tv_program(handle, base_url, params):
             url=ui.build_url(base_url, action="list_tv_program"),  # no-op
             icon=icon, fanart=fanart,
         )
-        for film in prime_films:
-            _render_tv_item(handle, base_url, film)
+        for film in _filter_tv_on_webshare(prime_films):
+            _add_discover_item(handle, base_url, film)
 
     xbmcplugin.setContent(handle, "movies")
     xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
@@ -3128,8 +3186,8 @@ def view_tv_program_films(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
         return
 
-    for it in out:
-        _render_tv_item(handle, base_url, it)
+    for it in _filter_tv_on_webshare(out):
+        _add_discover_item(handle, base_url, it)
 
     xbmcplugin.setContent(handle, "movies")
     xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
@@ -3153,9 +3211,8 @@ def view_tv_program_channel(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
         return
 
-    for it in items:
-        # V channel view nemusime opakovat kanal v kazdem labelu - je nahore.
-        _render_tv_item(handle, base_url, it, show_channel_in_label=False)
+    for it in _filter_tv_on_webshare(items):
+        _add_discover_item(handle, base_url, it)
 
     xbmcplugin.setContent(handle, "movies")
     xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
@@ -3164,6 +3221,28 @@ def view_tv_program_channel(handle, base_url, params):
 # ---------------------------------------------------------------------------
 # Voyo (SK) - discovery + Webshare search bridge (v0.0.67)
 # ---------------------------------------------------------------------------
+
+def _render_voyo_ws_item(handle: int, base_url: str,
+                           item: Dict[str, Any], section: str) -> None:
+    """v0.0.83: Voyo tile po WS filtru - jen polozky s variant_idents."""
+    title = (item.get("title") or "").strip()
+    if not title:
+        return
+    item_type = item.get("type") or ("movie" if section == "filmy" else "series")
+
+    if item_type == "movie" and item.get("base_title") and item.get("variant_idents"):
+        url = ui.build_url(
+            base_url, action="play_pick",
+            base=item["base_title"], mode="movie",
+        )
+        is_folder = False
+    else:
+        sname = item.get("series_name") or title
+        url = ui.build_url(base_url, action="list_series_seasons", name=sname)
+        is_folder = True
+
+    ui.add_video_item(handle, item, url, is_folder=is_folder)
+
 
 def _render_voyo_tile(handle: int, base_url: str, tile: Dict[str, Any],
                       section: str) -> None:
@@ -3393,8 +3472,31 @@ def view_voyo_category(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
         return
 
+    kind = "movie" if section == "filmy" else "series"
+    entries = []
     for tile in tiles:
-        _render_voyo_tile(handle, base_url, tile, section)
+        title = (tile.get("title") or "").strip()
+        if not title:
+            continue
+        carousel_name = (tile.get("carousel") or "").strip()
+        extra = f"[B]Voyo:[/B] {carousel_name}" if carousel_name else "[B]Voyo[/B]"
+        voyo_url = (tile.get("url") or "").strip()
+        if voyo_url:
+            extra += f"\nvoyo.markiza.sk: {voyo_url}"
+        entries.append({
+            "title": title,
+            "poster": tile.get("image") or "",
+            "fanart": tile.get("image") or "",
+            "_extra_plot": extra,
+        })
+
+    ws_items = api_webshare.filter_discovery_titles_on_webshare(entries, kind=kind)
+    if not ws_items:
+        ui.show_notification(
+            "Voyo: zadna polozka neni na Webshare", time_ms=5000)
+
+    for item in ws_items:
+        _render_voyo_ws_item(handle, base_url, item, section)
 
     content_type = "tvshows" if section in ("serialy", "relacie") else "movies"
     xbmcplugin.setContent(handle, content_type)
@@ -3507,19 +3609,8 @@ def _check_post_upgrade() -> None:
     """v0.0.79: Pri prvnim spusteni nove verze pluginu vynuti Kodi
     aby refresh interni texture cache (icon, fanart) a addon metadata.
 
-    Problem (user report v0.0.79):
-        Po upgrade pluginu Kodi cachuje stary icon.png v Texture DB
-        (Textures13.db). Pri zobrazeni addonu Kodi pouzije cached
-        bitmapu mistgo aby precetl novy soubor z disku. User vidi
-        starou ikonu i kdyz ZIP obsahuje novou.
-
-    Reseni:
-        Detekce upgrade pomoci 'last_seen_version' settings. Kdyz
-        aktualni verze != ulozena, plugin zavola Kodi builtins ktere
-        vynuti reload addon metadata + skin (= cache invalidace pro
-        ikony tohoto pluginu).
-
-    Idempotentni - bezi jen jednou na verzi.
+    v0.0.81: UpdateLocalAddons bezi v daemon threadu - neblokuje
+    otevreni menu pri prvnim spusteni po upgrade.
     """
     try:
         addon = _addon()
@@ -3532,18 +3623,22 @@ def _check_post_upgrade() -> None:
                  last_ver or "(prvni spusteni)", current_ver)
 
         try:
-            import xbmc  # type: ignore
-            # UpdateLocalAddons: Kodi znovu nacte addon manifest z disku,
-            # vcetne icon/fanart cest. Texture cache pro tento addon
-            # je invalidovana.
-            xbmc.executebuiltin('UpdateLocalAddons')
-        except Exception as exc:  # noqa: BLE001
-            log.debug("UpdateLocalAddons selhalo: %s", exc)
-
-        try:
             addon.setSetting("last_seen_version", current_ver)
         except Exception as exc:  # noqa: BLE001
             log.debug("setSetting last_seen_version selhalo: %s", exc)
+
+        def _refresh_icons_bg() -> None:
+            try:
+                import xbmc  # type: ignore
+                xbmc.executebuiltin('UpdateLocalAddons')
+            except Exception as exc:  # noqa: BLE001
+                log.debug("UpdateLocalAddons selhalo: %s", exc)
+
+        threading.Thread(
+            target=_refresh_icons_bg,
+            name="klempcinema-post-upgrade",
+            daemon=True,
+        ).start()
     except Exception as exc:  # noqa: BLE001
         log.debug("_check_post_upgrade selhalo: %s", exc)
 

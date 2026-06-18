@@ -48,7 +48,7 @@ POSTER_SIZE = "w500"
 FANART_SIZE = "w1280"
 
 DEFAULT_LANG = "cs-CZ"
-TIMEOUT = 5  # v0.0.64: 6 -> 5s pro lepsi shutdown responsiveness
+TIMEOUT = 4  # v0.0.81: 4s - rychlejsi shutdown
 
 # Session-level "TMDB is broken" flag. Po MAX_FAILURES selháních
 # (401/403/network) přestaneme TMDB volat až do restartu pluginu -
@@ -781,7 +781,8 @@ def search_tv(title: str) -> Optional[Dict[str, Any]]:
 
     # v0.0.58: cache key bump v2 - cut-at-first-marker zmenil clean
     # formu nazvu seriálu. Stara cache by drzela false-negative-y.
-    key = f"tmdb:tv:v2:{clean.lower()}"
+    # v0.0.83: bump v3 - search_tv vraci genre_ids pro zobrazeni zanru v UI
+    key = f"tmdb:tv:v3:{clean.lower()}"
     cached = cache.cache_get(key, ttl=HIT_TTL)
     if cached:
         return cached
@@ -820,6 +821,9 @@ def search_tv(title: str) -> Optional[Dict[str, Any]]:
             if not fanart_path and best_f:
                 fanart_path = best_f
 
+        raw_genre_ids = [int(g) for g in (r.get("genre_ids") or [])
+                         if isinstance(g, (int, float))]
+
         result = {
             "tmdb_id":    tmdb_id,
             "title":      r.get("name") or r.get("original_name") or clean,
@@ -831,6 +835,7 @@ def search_tv(title: str) -> Optional[Dict[str, Any]]:
             "popularity": float(r.get("popularity") or 0),
             "poster":     _poster_url(poster_path, POSTER_SIZE),
             "fanart":     _poster_url(fanart_path, FANART_SIZE),
+            "genre_ids":  raw_genre_ids,
         }
 
     if result:
@@ -854,7 +859,59 @@ def _date_year(date_str: Optional[str]) -> Optional[int]:
 # ENRICHMENT – doplnění metadat do našeho video-itemu
 # ---------------------------------------------------------------------------
 
-def _merge_meta(item: Dict[str, Any], meta: Dict[str, Any]) -> None:
+# ---------------------------------------------------------------------------
+# Žánry – genre_ids -> lokalizované názvy (cs-CZ z TMDB API)
+# ---------------------------------------------------------------------------
+
+_GENRE_ID_MAP: Dict[str, Dict[int, str]] = {}
+
+
+def _genre_id_map(kind: str = "movie") -> Dict[int, str]:
+    """Vrátí mapu TMDB genre_id -> název (cachuje 7 dní)."""
+    k = "tv" if kind == "tv" else "movie"
+    if k in _GENRE_ID_MAP:
+        return _GENRE_ID_MAP[k]
+    cache_key = f"tmdb_genres_{k}"
+    cached = cache.cache_get(cache_key, ttl=7 * 86400)
+    if cached is not None:
+        out = {int(g["id"]): (g.get("name") or "")
+               for g in (cached or []) if isinstance(g, dict) and "id" in g}
+        _GENRE_ID_MAP[k] = out
+        return out
+    try:
+        data = _http_get(f"/genre/{k}/list")
+    except Exception as exc:  # noqa: BLE001
+        log.debug("_genre_id_map(%s) selhalo: %s", k, exc)
+        _GENRE_ID_MAP[k] = {}
+        return {}
+    genres = [{"id": int(g["id"]), "name": g.get("name") or ""}
+              for g in ((data or {}).get("genres") or [])]
+    cache.cache_set(cache_key, genres)
+    out = {g["id"]: g["name"] for g in genres}
+    _GENRE_ID_MAP[k] = out
+    return out
+
+
+def genre_names_for_ids(genre_ids: List[int],
+                        kind: str = "movie") -> List[str]:
+    """Přeloží TMDB genre_ids na čitelné názvy žánrů."""
+    if not genre_ids:
+        return []
+    id_map = _genre_id_map(kind)
+    names: List[str] = []
+    for gid in genre_ids:
+        try:
+            gid_int = int(gid)
+        except (TypeError, ValueError):
+            continue
+        name = id_map.get(gid_int) or ""
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _merge_meta(item: Dict[str, Any], meta: Dict[str, Any],
+                kind: str = "movie") -> None:
     """In-place doplnění metadat z TMDB do interního video-itemu."""
     if meta.get("title"):
         item["title_localized"] = meta["title"]
@@ -884,7 +941,9 @@ def _merge_meta(item: Dict[str, Any], meta: Dict[str, Any]) -> None:
     # (napr. Animovane CZ/SK filtruje na 16). Zachovavame i prazdny list,
     # at vime, ze enrich probehl a item nema zadny genre (= zahodit).
     if "genre_ids" in meta:
-        item["genre_ids"] = list(meta.get("genre_ids") or [])
+        gids = list(meta.get("genre_ids") or [])
+        item["genre_ids"] = gids
+        item["genre_names"] = list(meta.get("genre_names") or []) or genre_names_for_ids(gids, kind)
 
 
 def get_imdb_id(tmdb_id: int, kind: str = "movie") -> Optional[str]:
@@ -971,11 +1030,13 @@ def enrich_movie_item(item: Dict[str, Any]) -> Dict[str, Any]:
     # enrichu, treba z bufferu z cache), nedelej dalsi TMDB volani.
     # 'tmdb_id' + 'poster' + 'title_localized' = mame enrich hotov.
     if item.get("tmdb_id") and item.get("poster") and item.get("title_localized"):
+        if item.get("genre_ids") and not item.get("genre_names"):
+            item["genre_names"] = genre_names_for_ids(item["genre_ids"], "movie")
         return item
     try:
         meta = search_movie(item.get("title") or "", item.get("year"))
         if meta:
-            _merge_meta(item, meta)
+            _merge_meta(item, meta, kind="movie")
     except Exception as exc:  # noqa: BLE001
         log.debug("enrich_movie_item(%r) selhalo: %s", item.get("title"), exc)
     return item
@@ -987,11 +1048,13 @@ def enrich_series_item(item: Dict[str, Any]) -> Dict[str, Any]:
         return item
     # v0.0.62: SHORTCUT - skip pokud uz mame TMDB data
     if item.get("tmdb_id") and item.get("poster") and item.get("title_localized"):
+        if item.get("genre_ids") and not item.get("genre_names"):
+            item["genre_names"] = genre_names_for_ids(item["genre_ids"], "tv")
         return item
     try:
         meta = search_tv(item.get("title") or "")
         if meta:
-            _merge_meta(item, meta)
+            _merge_meta(item, meta, kind="tv")
     except Exception as exc:  # noqa: BLE001
         log.debug("enrich_series_item(%r) selhalo: %s", item.get("title"), exc)
     return item

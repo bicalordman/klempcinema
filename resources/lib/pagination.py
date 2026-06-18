@@ -4,51 +4,33 @@ pagination.py
 -------------
 Centrální pagination logika pro KlempCinema.
 
-PROBLÉM:
-    Webshare vrací max 200 souborů per request, ale po filtrech
-    (exclude_series, year_range, dedupe, only_with_poster, kids_only_czech)
-    zbude variabilní počet (5/10/4...).
-    Uživatel pak vidí nekonzistentní listingy.
-
-ŘEŠENÍ:
-    UI_PAGE_SIZE = 20 - pevný target na UI stránku.
-
-    Funkce paginate_category() spustí "fetcher" (např. get_movies_raw_page())
-    opakovaně dokud nemá v bufferu aspoň ui_page * 20 + buffer položek
-    nebo dokud nedojde Webshare obsah.
-
-    Buffer agregovaných položek je cachovaný (per query+sort+rubrika)
-    na 30 minut - umožňuje rychlé stránkování bez re-fetch každé stránky.
-
-PUBLIC API:
-    UI_PAGE_SIZE                                                -> int (20)
-    paginate(items, ui_page)                                    -> list
-    paginate_with_fetcher(cache_key, fetcher, ui_page,
-                          max_ws_pages=10)                      -> (items, has_more)
+v0.0.83: FROZEN PAGE SLICES - kazda stranka se pri prvnim otevreni
+setri z neprirazenych polozek a uz se nemeni (fix opakovani).
+Zaroven globalni sort v ramci kazde nove stranky (Michael 2026
+nezmizi jen proto, ze prisel v pozdejsim WS batchi).
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import cache
 
 log = logging.getLogger("klempcinema.pagination")
 
-# Default počet položek na UI stránku. Pokud user změní v Settings
-# (items_per_page slider), tato hodnota se přepíše.
-UI_PAGE_SIZE_DEFAULT = 50
+UI_PAGE_SIZE_DEFAULT = 30
+AGG_TTL = 30 * 60
+DEFAULT_MAX_WS_PAGES = 4
 
 
 def _read_ui_page_size() -> int:
-    """Načti items_per_page z settings (default 50, range 10..100)."""
     try:
         import xbmcaddon  # type: ignore
         addon = xbmcaddon.Addon()
         raw = addon.getSetting("items_per_page") or str(UI_PAGE_SIZE_DEFAULT)
         n = int(raw)
-        # Bezpečné meze
         if n < 10:
             return 10
         if n > 100:
@@ -58,27 +40,10 @@ def _read_ui_page_size() -> int:
         return UI_PAGE_SIZE_DEFAULT
 
 
-# Vystavujeme i jako modul-level konstantu pro zpětnou kompatibilitu.
-# Hodnota je dynamicky čtena při každém volání paginate_*.
 UI_PAGE_SIZE = UI_PAGE_SIZE_DEFAULT
-
-# Jak dlouho držet agregovaný buffer položek v cache.
-# v0.0.48: 10min -> 30min. Po prvnim otevreni se rubrika cachuje na pul
-# hodiny - dalsi otevreni je INSTANT (zadne WS+TMDB requesty). Trade-off:
-# nove uploady na WS se objevi az po 30min. Pro user-friendly rychlost
-# je to lepsi nez 10min cache + pomale opetovne nacitani.
-AGG_TTL = 30 * 60  # 30 minut
-
-# Bezpečnostní strop - kolik Webshare stránek max fetchnout pro jednu rubriku.
-# v0.0.48: 10 -> 5 (rychlejsi first load).
-# v0.0.62: 5 -> 4 (jeste rychlejsi first load na slabsich platformach
-# jako Xbox. Pri Dalsi-stranka se fetchne dalsich 4. Plus uz mame v0.0.61
-# prefetch.schedule = dalsi stranka casto cachovana driv nez user klikne).
-DEFAULT_MAX_WS_PAGES = 4
 
 
 def paginate(items: List[Any], ui_page: int) -> List[Any]:
-    """Vrátí výsek items[(ui_page-1)*size : ui_page*size]."""
     if not items:
         return []
     size = _read_ui_page_size()
@@ -88,8 +53,19 @@ def paginate(items: List[Any], ui_page: int) -> List[Any]:
 
 
 def has_more_pages(total_items: int, ui_page: int) -> bool:
-    """True pokud po této UI stránce zbývají další položky."""
     return total_items > ui_page * _read_ui_page_size()
+
+
+def _assigned_ids(page_slices: Dict[str, List[str]]) -> set:
+    out: set = set()
+    for ids in page_slices.values():
+        out.update(ids)
+    return out
+
+
+def _unassigned_ids(items_by_id: Dict[str, Any],
+                    assigned: set) -> List[str]:
+    return [sid for sid in items_by_id if sid not in assigned]
 
 
 def paginate_with_fetcher(
@@ -103,152 +79,211 @@ def paginate_with_fetcher(
     """
     Vrátí výsek pro UI stránku 'ui_page' a flag 'has_more'.
 
-    Strategie:
-      1) Načti agregovaný buffer z cache (klíč 'cache_key').
-      2) Pokud buffer < (ui_page+1) * page_size, dofetchni další WS stránky.
-      3) Po každém fetchnutí setřiď celý buffer (pokud sort_key).
-      4) Persist state. Vrať items[(ui_page-1)*size : ui_page*size] + has_more.
-
-    Fetcher protokol:
-      - vrátí None    -> Webshare opravdu došel (exhausted)
-      - vrátí []      -> Webshare dal soubory, ale po filtrech 0 položek
-                         (try next WS page, NEzastavovat)
-      - vrátí [items] -> přidat do bufferu
-
-    Tím se ošetří situace, kdy 1 WS strana (200 souborů) je celá vyfiltrovaná
-    a uživatel by jinak viděl "obsah nenalezen" než se klikne na další stranu.
-
-    :param sort_key: callable(item) -> klíč pro sort celého bufferu.
-                     Když None, buffer zůstává v pořadí přidání (per-page sort).
-    :param max_ws_pages: bezpečnostní strop fetchů (default 10).
-    :param ttl_override: vlastní TTL v sekundách. None = AGG_TTL (30 min).
-                         v0.0.63: rubrika 'Novinky' pouziva 600s (10 min),
-                         protoze tam zalezi na cerstvosti vic nez na rychlosti.
+    v0.0.83: page_slices[str(page)] = frozen list stable IDs.
+    Pri prvnim otevreni stranky N se z neprirazenych polozek vybere
+    top page_size dle sort_key. Drivejsi stranky se nemeni.
     """
     page_size = _read_ui_page_size()
     effective_ttl = ttl_override if ttl_override is not None else AGG_TTL
-    # v0.0.48: zmensen needed buffer - z (ui_page+1)*size na ui_page*size+10.
-    # Drive jsme fetchovali navic CELOU jednu stranku do bufferu pro pripadne
-    # Dalsi-stranka kliky. Ted: jen 10 polozek navic (rychlejsi first load).
-    # Pokud user da Dalsi stranka, prefetch.schedule() uz fetchne dalsi
-    # na pozadi, takze klik bude stejne instant.
-    needed = ui_page * page_size + 10
+    needed_assigned = ui_page * page_size
 
-    # 1) Načti uložený buffer + state
     state = cache.cache_get(cache_key, ttl=effective_ttl) or {}
-    items: List[Any] = list(state.get("items") or [])
+    items_by_id: Dict[str, Any] = dict(state.get("items_by_id") or {})
+    page_slices: Dict[str, List[str]] = {
+        str(k): list(v) for k, v in (state.get("page_slices") or {}).items()
+    }
+    known_keys: set = set(state.get("known_keys") or [])
     next_ws_page: int = int(state.get("next_ws_page") or 1)
     exhausted: bool = bool(state.get("exhausted"))
 
+    # Migrace ze stareho formatu
+    if not items_by_id and state.get("items"):
+        pool: List[str] = []
+        for it in state["items"]:
+            _register_item(it, items_by_id, pool, known_keys)
+        _rebuild_slices_from_pool(items_by_id, pool, page_slices,
+                                  page_size, sort_key)
+
+    assigned = _assigned_ids(page_slices)
     fetched_now = 0
 
-    # 2) Dofetch dokud nemáme dost položek (nebo Webshare opravdu nedojde)
-    while len(items) < needed and not exhausted and fetched_now < max_ws_pages:
-        log.debug("paginate(%s): fetch WS page %d (have=%d, need=%d)",
-                  cache_key, next_ws_page, len(items), needed)
+    def _pool_size() -> int:
+        return len(items_by_id)
+
+    while len(assigned) < needed_assigned and not exhausted and fetched_now < max_ws_pages:
+        log.debug("paginate(%s): fetch WS page %d (pool=%d, assigned=%d, need=%d)",
+                  cache_key, next_ws_page, _pool_size(), len(assigned),
+                  needed_assigned)
         try:
             new_items = fetcher(next_ws_page)
         except Exception as exc:  # noqa: BLE001
             log.exception("paginate fetcher selhal: %s", exc)
             new_items = None
 
-        # None = WS opravdu došel. Skutečně vyčerpáno.
         if new_items is None:
             exhausted = True
-            log.debug("paginate(%s): WS exhausted at ws_page=%d (items=%d)",
-                      cache_key, next_ws_page, len(items))
             break
 
-        # [] = WS dal něco, ale po filtrech 0. Pokračujeme dál.
         next_ws_page += 1
         fetched_now += 1
 
         if new_items:
-            # Dedup mezi WS stránkami (podle tmdb_id nebo title)
-            added = _dedup_against_existing(items, new_items)
-            items.extend(added)
-            log.debug("paginate(%s): WS page %d -> +%d items (total=%d)",
-                      cache_key, next_ws_page - 1, len(added), len(items))
+            batch = _filter_new_items(new_items, items_by_id, known_keys)
+            for it in batch:
+                _register_item(it, items_by_id, [], known_keys)
+            log.debug("paginate(%s): WS page %d -> +%d (pool=%d)",
+                      cache_key, next_ws_page - 1, len(batch), _pool_size())
 
-    # 3) Globální sort celého bufferu (pokud sort_key zadán)
-    if sort_key and items:
-        try:
-            items.sort(key=sort_key)
-        except Exception as exc:  # noqa: BLE001
-            log.debug("paginate sort selhal: %s", exc)
+        assigned = _assigned_ids(page_slices)
 
-    # 4) Persist state
+    # Sestav chybejici stranky 1..ui_page
+    assigned = _assigned_ids(page_slices)
+    for p in range(1, ui_page + 1):
+        pk = str(p)
+        if pk in page_slices:
+            continue
+        unassigned = _unassigned_ids(items_by_id, assigned)
+        if not unassigned:
+            page_slices[pk] = []
+            continue
+        if sort_key:
+            try:
+                unassigned.sort(
+                    key=lambda sid: sort_key(items_by_id[sid]))
+            except Exception as exc:  # noqa: BLE001
+                log.debug("paginate page sort selhal: %s", exc)
+        take = unassigned[:page_size]
+        page_slices[pk] = take
+        assigned = _assigned_ids(page_slices)
+
+    all_items = [items_by_id[sid] for sid in items_by_id]
     cache.cache_set(cache_key, {
-        "items": items,
+        "items_by_id": items_by_id,
+        "page_slices": page_slices,
+        "known_keys": list(known_keys),
+        "items": all_items,
         "next_ws_page": next_ws_page,
         "exhausted": exhausted,
     })
 
-    # 5) Slice + has_more
-    page_items = paginate(items, ui_page)
-    has_more = (not exhausted) or len(items) > ui_page * page_size
+    page_ids = page_slices.get(str(ui_page), [])
+    page_items = [items_by_id[sid] for sid in page_ids if sid in items_by_id]
+    assigned_all = _assigned_ids(page_slices)
+    unassigned_left = len(_unassigned_ids(items_by_id, assigned_all))
+    next_page = str(ui_page + 1)
+    has_more = (
+        unassigned_left > 0
+        or not exhausted
+        or bool(page_slices.get(next_page))
+    )
 
-    # Jeden info log per page request (ne per fetch) - pro orientacni
-    # diagnostiku v Kodi logu, bez zahlceni.
     log.info("paginate(%s): ui_page=%d -> %d items, has_more=%s "
-             "(buf=%d, fetched_now=%d)",
+             "(pool=%d, pages=%d, fetched_now=%d)",
              cache_key, ui_page, len(page_items), has_more,
-             len(items), fetched_now)
+             len(items_by_id), len(page_slices), fetched_now)
     return page_items, has_more
 
 
+def _rebuild_slices_from_pool(
+    items_by_id: Dict[str, Any],
+    pool: List[str],
+    page_slices: Dict[str, List[str]],
+    page_size: int,
+    sort_key: Optional[Callable[[Any], Any]],
+) -> None:
+    """Migrace: rozdeli pool do stranek (best-effort)."""
+    ids = list(pool)
+    if sort_key and ids:
+        try:
+            ids.sort(key=lambda sid: sort_key(items_by_id[sid]))
+        except Exception:  # noqa: BLE001
+            pass
+    p = 1
+    while ids:
+        page_slices[str(p)] = ids[:page_size]
+        ids = ids[page_size:]
+        p += 1
+
+
 def invalidate(cache_key: str) -> None:
-    """Smaž agregovaný buffer pro danou rubriku (např. po změně settings)."""
     cache.cache_set(cache_key, None)
 
 
-# ---------------------------------------------------------------------------
-# Internal
-# ---------------------------------------------------------------------------
+def _norm(s: str) -> str:
+    if not s:
+        return ""
+    return re.sub(r"\s+", " ", s.lower()).strip()
 
-def _dedup_against_existing(existing: List[Any], incoming: List[Any]) -> List[Any]:
-    """
-    Vrátí podmnožinu 'incoming', která ještě není v 'existing'.
 
-    Položka může mít VÍC klíčů (tmdb_id + original_title+year + base_title)
-    a všechny se ukládají do seen sady. Tím se odchytí situace, kdy stránka 1
-    má položku jen s base_title a stránka 2 stejný film s tmdb_id - dedup
-    by jinak je dva zachytil.
-    """
-    if not existing:
-        return list(incoming)
+def _stable_item_id(it: Dict[str, Any]) -> str:
+    tid = it.get("tmdb_id")
+    if tid:
+        return f"tmdb:{tid}"
 
-    seen_keys: set = set()
-    for it in existing:
-        for k in _item_keys(it):
-            seen_keys.add(k)
+    year = it.get("year") or ""
+    base = _norm(
+        it.get("base_title") or it.get("series_name")
+        or it.get("title_localized") or it.get("title") or ""
+    )
+    if base:
+        return f"title:{base}|{year}"
 
+    for ident in (it.get("variant_idents") or []):
+        if ident:
+            return f"ident:{ident}"
+    return f"anon:{id(it)}"
+
+
+def _register_item(
+    it: Dict[str, Any],
+    items_by_id: Dict[str, Any],
+    display_order: List[str],
+    known_keys: set,
+) -> None:
+    sid = _stable_item_id(it)
+    if sid in items_by_id:
+        return
+    items_by_id[sid] = it
+    if display_order is not None:
+        display_order.append(sid)
+    for k in _item_keys(it):
+        known_keys.add(k)
+    known_keys.add(sid)
+
+
+def _filter_new_items(
+    incoming: List[Any],
+    items_by_id: Dict[str, Any],
+    known_keys: set,
+) -> List[Any]:
     out = []
     for it in incoming:
+        if not isinstance(it, dict):
+            continue
+        sid = _stable_item_id(it)
+        if sid in items_by_id:
+            continue
         keys = _item_keys(it)
-        if not keys:
-            out.append(it)
+        if keys and any(k in known_keys for k in keys):
             continue
-        if any(k in seen_keys for k in keys):
+        if not keys and sid in known_keys:
             continue
-        for k in keys:
-            seen_keys.add(k)
         out.append(it)
     return out
 
 
-def _item_keys(it: Dict[str, Any]) -> List[str]:
-    """
-    Sada klíčů pro cross-page dedup. Vrací VÍCE klíčů per item, aby dedup
-    sjednotil i situace, kdy položka nemá vždy stejný identifikátor.
+def _dedup_against_existing(existing: List[Any], incoming: List[Any]) -> List[Any]:
+    if not existing:
+        return list(incoming)
+    known_keys: set = set()
+    items_by_id: Dict[str, Any] = {}
+    for it in existing:
+        if isinstance(it, dict):
+            _register_item(it, items_by_id, [], known_keys)
+    return _filter_new_items(incoming, items_by_id, known_keys)
 
-    Priorita silnosti:
-        1) tmdb_id              (nejstabilnější napříč WS variantami)
-        2) original_title+year  (en title - stejný i pro cs varianty)
-        3) base_title           (cleaned filename - může se lišit)
-        4) series_name          (pro seriály)
-        5) title_localized      (TMDB cs title - může se měnit po enrichi)
-    """
+
+def _item_keys(it: Dict[str, Any]) -> List[str]:
     if not isinstance(it, dict):
         return []
     keys: List[str] = []
@@ -258,35 +293,31 @@ def _item_keys(it: Dict[str, Any]) -> List[str]:
         keys.append(f"tmdb:{tid}")
 
     year = it.get("year")
-    orig = (it.get("original_title") or "").strip().lower()
+    orig = _norm(it.get("original_title") or "")
     if orig:
-        if year:
-            keys.append(f"orig:{orig}|{year}")
-        else:
-            keys.append(f"orig:{orig}")
+        keys.append(f"orig:{orig}|{year or ''}")
 
-    base = (it.get("base_title") or "").strip().lower()
+    base = _norm(it.get("base_title") or "")
     if base:
-        if year:
-            keys.append(f"base:{base}|{year}")
-        else:
-            keys.append(f"base:{base}")
+        keys.append(f"base:{base}|{year or ''}")
+        keys.append(f"base:{base}|")
 
-    sname = (it.get("series_name") or "").strip().lower()
+    sname = _norm(it.get("series_name") or "")
     if sname:
         keys.append(f"series:{sname}")
 
-    loc = (it.get("title_localized") or "").strip().lower()
+    loc = _norm(it.get("title_localized") or "")
     if loc and loc != base:
-        if year:
-            keys.append(f"loc:{loc}|{year}")
-        else:
-            keys.append(f"loc:{loc}")
+        keys.append(f"loc:{loc}|{year or ''}")
+
+    if not keys:
+        title = _norm(it.get("title") or "")
+        if title:
+            keys.append(f"fb:{title}|{year or ''}")
 
     return keys
 
 
-# Zpětně kompatibilní helper (pokud někdo volá _item_key)
 def _item_key(it: Dict[str, Any]) -> str:
     keys = _item_keys(it)
     return keys[0] if keys else ""

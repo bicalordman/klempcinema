@@ -42,6 +42,8 @@ def _movie_to_meta(r: Dict[str, Any]) -> Dict[str, Any]:
     tmdb_id = r.get("id")
     poster_path, fanart_path = _fill_images_if_missing(
         tmdb_id, r.get("poster_path"), r.get("backdrop_path"), kind="movie")
+    raw_genre_ids = [int(g) for g in (r.get("genre_ids") or [])
+                     if isinstance(g, (int, float))]
     return {
         "tmdb_id":    tmdb_id,
         "title":      r.get("title") or r.get("original_title") or "",
@@ -53,6 +55,7 @@ def _movie_to_meta(r: Dict[str, Any]) -> Dict[str, Any]:
         "popularity": float(r.get("popularity") or 0),
         "poster":     _tmdb._poster_url(poster_path, _tmdb.POSTER_SIZE),
         "fanart":     _tmdb._poster_url(fanart_path, _tmdb.FANART_SIZE),
+        "genre_ids":  raw_genre_ids,
         "type":       "movie",
     }
 
@@ -61,6 +64,8 @@ def _tv_to_meta(r: Dict[str, Any]) -> Dict[str, Any]:
     tmdb_id = r.get("id")
     poster_path, fanart_path = _fill_images_if_missing(
         tmdb_id, r.get("poster_path"), r.get("backdrop_path"), kind="tv")
+    raw_genre_ids = [int(g) for g in (r.get("genre_ids") or [])
+                     if isinstance(g, (int, float))]
     return {
         "tmdb_id":    tmdb_id,
         "title":      r.get("name") or r.get("original_name") or "",
@@ -72,6 +77,7 @@ def _tv_to_meta(r: Dict[str, Any]) -> Dict[str, Any]:
         "popularity": float(r.get("popularity") or 0),
         "poster":     _tmdb._poster_url(poster_path, _tmdb.POSTER_SIZE),
         "fanart":     _tmdb._poster_url(fanart_path, _tmdb.FANART_SIZE),
+        "genre_ids":  raw_genre_ids,
         "type":       "series",
     }
 

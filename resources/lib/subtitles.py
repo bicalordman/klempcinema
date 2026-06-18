@@ -50,11 +50,7 @@ from . import shutdown as _shutdown
 log = logging.getLogger("klempcinema.subtitles")
 
 ORG_XMLRPC_URL = "https://api.opensubtitles.org/xml-rpc"
-# v0.0.64: 25 -> 8s. Pri Kodi shutdown ceka Python az urlopen() syscall
-# dobehne. 25s timeout = az 25s wait na vypnuti Kodi v worst-case.
-# 8s je dostatecne pro OpenSubtitles XML-RPC (normalne ~1-2s);
-# pomalejsi response = uzivatel pocka pri stahnuti titulku, ne pri exit.
-TIMEOUT = 8
+TIMEOUT = 5  # v0.0.81: 8->5s - rychlejsi shutdown Kodi
 
 # Oficiálně registrované UA, které OpenSubtitles akceptuje.
 # XBMC_Subtitles_v1 je standardní UA Kodi pro stahování titulků.

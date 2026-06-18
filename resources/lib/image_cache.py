@@ -40,10 +40,8 @@ MAX_TOTAL_BYTES = 200 * 1024 * 1024  # 200 MB
 # UI scroll (TMDB CDN je rychle), a snizuje na pulku worst-case shutdown
 # wait time. Pomalejsi zarizeni (Xbox One, RPi3) tezi nejvic.
 MAX_WORKERS = 2
-# v0.0.64: 5 -> 3s. Plakaty maji ~200 KB - na cesty s 100kbps trva 16s,
-# ale takove spojeni je dnes vzacne. 3s pokryje normal CDN load. Pri
-# shutdown je max wait 3s misto 5s.
-DOWNLOAD_TIMEOUT = 3
+# v0.0.81: 2s timeout - plakaty jsou male, shutdown max wait 2s.
+DOWNLOAD_TIMEOUT = 2
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

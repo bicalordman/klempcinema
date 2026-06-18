@@ -45,7 +45,7 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -61,6 +61,9 @@ log = logging.getLogger("klempcinema.api_webshare")
 # Max paralelních vláken pro TMDB/ČSFD enrich. Víc = rychlejší,
 # ale příliš mnoho současných requestů ohrozí rate-limit a riskne ban.
 ENRICH_WORKERS = 6  # v0.0.48: 8 -> 6 (bezpecnejsi TMDB rate limit 40 req/s)
+# v0.0.81: max cekani na enrich pred zobrazenim seznamu. Po uplynuti
+# budgetu se zobrazi polozky s tim co stihlo dobehnout (zbytek = WS thumb).
+ENRICH_MAX_WAIT_SEC = 6
 
 
 # ---------------------------------------------------------------------------
@@ -83,10 +86,8 @@ DEFAULT_HEADERS = {
 FORM_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
 }
-# v0.0.63: 15 -> 8s. Pri shutdown daemon thread v urlopen() blokuje
-# proces az do timeoutu. 8s je dost na Webshare slowest endpoint
-# (search), drive 15s znamenalo ze Kodi mohl zatuhnout az 15s pri exit.
-DEFAULT_TIMEOUT = 8
+# v0.0.63: 15 -> 8s. v0.0.81: 8 -> 5s (rychlejsi shutdown + first load).
+DEFAULT_TIMEOUT = 5
 
 # Kolik souborů načítáme z Webshare na jednu stránku.
 PAGE_LIMIT = 200
@@ -1691,6 +1692,19 @@ def _enrich_skip_enabled() -> bool:
     return (addon.getSetting("enrich_skip") or "false").lower() in ("true", "1")
 
 
+def _needs_csfd_fallback(it: Dict[str, Any], tmdb_works: bool) -> bool:
+    """v0.0.81: CSFD scrape je pomaly (1-3s/item). Na seznamech ho volame
+    jen kdyz TMDB neposkytl plakat nebo rating - ne pro kazdou polozku."""
+    if not tmdb_works:
+        return True
+    poster = (it.get("poster") or "").strip()
+    rating = float(it.get("rating") or 0)
+    votes = int(it.get("votes") or 0)
+    if poster and (rating > 0 or votes > 0):
+        return False
+    return True
+
+
 def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
                           skip_csfd: bool = False) -> None:
     """
@@ -1707,8 +1721,10 @@ def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
     Inteligentní volba providerů:
         1) Pokud user vypnul vše ('enrich_skip = true'), vrací hned.
         2) TMDB self_test() rozhodne, jestli vůbec stojí za to TMDB volat.
-        3) Pokud TMDB funguje  -> 12 vláken, TMDB má prioritu, ČSFD jen fallback.
-        4) Pokud TMDB nefunguje -> 2 vlákna, ČSFD-only (anti-bot).
+        3) Pokud TMDB funguje  -> paralelni TMDB, CSFD jen fallback.
+        4) Pokud TMDB nefunguje -> 2 vlakna, CSFD-only (anti-bot).
+        5) v0.0.81: casovy budget ENRICH_MAX_WAIT_SEC - seznam se
+           zobrazi i kdyz enrich nedobehl pro vsechny polozky.
     """
     if not items:
         return
@@ -1740,14 +1756,10 @@ def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
                     tmdb.enrich_series_item(it)
                 else:
                     tmdb.enrich_movie_item(it)
-            # v0.0.56: ČSFD volat VZDY (pokud zapnute) - nejen jako
-            # fallback. Drive ČSFD se volal jen kdyz TMDB nedoplnil
-            # poster/rating, takze user nikdy nevidel ČSFD rating
-            # u filmu co mel TMDB metadata. Ted se ČSFD rating ulozi
-            # do csfd_rating jako BONUS vedle TMDB rating.
             if _shutdown.is_shutting_down():
                 return
-            if csfd_on:
+            # v0.0.81: CSFD jen fallback (ne pro kazdou polozku s TMDB daty).
+            if csfd_on and _needs_csfd_fallback(it, tmdb_works):
                 if kind == "series":
                     csfd.enrich_series_item(it)
                 else:
@@ -1765,7 +1777,18 @@ def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
               len(items), workers, tmdb_works, csfd_on, kind, tmdb_test.get("reason"))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(_enrich_one, items))
+        futures = [pool.submit(_enrich_one, it) for it in items]
+        pending = set(futures)
+        budget = float(ENRICH_MAX_WAIT_SEC)
+        while pending and budget > 0 and not _shutdown.is_shutting_down():
+            _done, pending = wait(pending, timeout=min(0.5, budget))
+            budget -= 0.5
+        if pending:
+            reason = "shutdown" if _shutdown.is_shutting_down() else "budget"
+            log.info("enrich: %s - %d/%d polozek nedobehlo",
+                     reason, len(pending), len(futures))
+            for fut in pending:
+                fut.cancel()
 
 
 def _files_to_variant_refs(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1874,6 +1897,26 @@ def _filter_with_poster(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out = [it for it in items if has_real_poster(it)]
     log.info("_filter_with_poster: %d -> %d items (only_with_poster=true)",
              len(items), len(out))
+    return out
+
+
+def _filter_with_webshare_files(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """v0.0.82: Zobraz jen polozky s realnymi WS soubory (variant_idents)."""
+    if not items:
+        return items
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        idents = [i for i in (it.get("variant_idents") or []) if i]
+        if not idents:
+            log.debug("_filter_with_webshare_files: skip %r (no variant_idents)",
+                      it.get("title") or it.get("base_title"))
+            continue
+        it["variant_idents"] = idents
+        it["variants_count"] = len(idents)
+        out.append(it)
+    if len(out) != len(items):
+        log.info("_filter_with_webshare_files: %d -> %d items",
+                 len(items), len(out))
     return out
 
 
@@ -2009,6 +2052,7 @@ def _movies_from_groups(
     _enrich_in_parallel(items, kind="movie", skip_csfd=skip_csfd)
     items = _dedupe_after_enrich(items, mode="movie")
     items = _filter_with_poster(items)
+    items = _filter_with_webshare_files(items)
     return items
 
 
@@ -2078,6 +2122,7 @@ def _series_from_groups(groups: Dict[str, List[Dict[str, Any]]]) -> List[Dict[st
     _enrich_in_parallel(items, kind="series")
     items = _dedupe_after_enrich(items, mode="series")
     items = _filter_with_poster(items)
+    items = _filter_with_webshare_files(items)
     return items
 
 
@@ -2210,6 +2255,16 @@ def _dedupe_after_enrich(items: List[Dict[str, Any]],
 
         canonical["variant_idents"] = all_variants
         canonical["variants_count"] = len(all_variants)
+        if all_variants:
+            base = (canonical.get("base_title") or canonical.get("series_name")
+                    or canonical.get("title") or "")
+            if base:
+                refs = _load_variants_cache(base, mode=mode, ttl=24 * 3600)
+                if not refs:
+                    refs = [{"ident": i, "name": "", "size": 0, "img": ""}
+                            for i in all_variants if i]
+                if refs:
+                    _save_variants_cache(base, mode, refs)
         canonical["dubbed"] = any(it.get("dubbed") for it in group)
 
         # Cache pro play_pick: musí obsahovat full variant refs.
@@ -2641,6 +2696,33 @@ def _paginate_multi_query(
     )
 
 
+def _effective_release_year(it: Dict[str, Any]) -> int:
+    """
+    v0.0.83: Nejspolehlivejsi rok pro filtry - max z TMDB, nazvu souboru
+    a WS variant. Oprava: TMDB obcas matchne jiny film (napr. stary
+    'Michael' misto 'Michael 2026') a post_filter ho vyhodil z Novych dabingu.
+    """
+    years: List[int] = []
+    y = int(it.get("year") or 0)
+    if y > 0:
+        years.append(y)
+    for field in ("base_title", "title", "title_localized"):
+        gy = _guess_year((it.get(field) or ""))
+        if gy and gy > 0:
+            years.append(int(gy))
+    base = it.get("base_title") or it.get("title") or ""
+    if base:
+        try:
+            refs = _load_variants_cache(base, mode="movie", ttl=24 * 3600)
+            for v in refs:
+                gy = _guess_year(v.get("name") or "")
+                if gy and gy > 0:
+                    years.append(int(gy))
+        except Exception:  # noqa: BLE001
+            pass
+    return max(years) if years else 0
+
+
 def _read_new_dub_min_year() -> Optional[int]:
     """
     Min. rok pro filtr v rubrice "Filmy novinky dabované CZ/SK".
@@ -2694,13 +2776,20 @@ def get_movies_new_dub(sort: str = "recent", page: int = 1) -> Tuple[List[Dict[s
     def _post(its):
         min_y = _read_new_dub_min_year()
         if min_y is not None:
-            its = [it for it in its
-                   if int(it.get("year") or 0) == 0
-                   or int(it.get("year") or 0) >= min_y]
+            kept = []
+            for it in its:
+                eff_y = _effective_release_year(it)
+                if eff_y == 0 or eff_y >= min_y:
+                    kept.append(it)
+                else:
+                    log.debug("new_dub post_filter: skip %r (eff_year=%d < %d)",
+                              it.get("base_title") or it.get("title"),
+                              eff_y, min_y)
+            its = kept
         return its
 
     return _paginate_multi_query(
-        cache_key=f"rubrika:newdub:v5:{cy}:{user_query}",
+        cache_key=f"rubrika:newdub:v6:{cy}:{user_query}",
         queries=queries, ui_page=page,
         pre_filter=_pre, post_filter=_post,
         sort_key=_recent_first_sort_key,
@@ -3731,6 +3820,251 @@ def get_quality_variants(base_title: str, mode: str = "movie") -> List[Dict[str,
         _save_variants_cache(base_title, mode, fresh_variants)
 
     return fresh_variants
+
+
+# ---------------------------------------------------------------------------
+# 5c) TMDB discover -> Webshare filter (v0.0.82)
+# ---------------------------------------------------------------------------
+
+TMDB_WS_FILTER_WORKERS = 4
+TMDB_WS_FILTER_MAX_WAIT = 14
+
+
+def _ws_files_for_tmdb_title(title: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Rychly WS search pro TMDB titul - vrati matching movie soubory."""
+    if not title or _shutdown.is_shutting_down():
+        return []
+    queries = [title]
+    if year:
+        queries.append(f"{title} {year}")
+    all_files: List[Dict[str, Any]] = []
+    seen: set = set()
+    for q in queries:
+        files = search_videos(query=q, sort="rating", page=1)
+        if not files:
+            continue
+        for f in files:
+            ident = f.get("ident") or f.get("id") or ""
+            if ident and ident not in seen:
+                seen.add(ident)
+                all_files.append(f)
+    if not all_files:
+        return []
+    all_files = _exclude_series(all_files)
+    if not all_files:
+        return []
+    target = _norm_compare(title)
+    matching: List[Dict[str, Any]] = []
+    for f in all_files:
+        cand = _normalize_title(f.get("name") or "")
+        cand_norm = _norm_compare(cand)
+        if not cand_norm:
+            continue
+        if cand_norm == target or _title_tokens_match(title, cand):
+            if year and str(year) not in (f.get("name") or ""):
+                gy = _guess_year(f.get("name") or "")
+                if gy and int(gy) != int(year):
+                    continue
+            matching.append(f)
+    return matching
+
+
+def tmdb_movie_meta_to_ws_item(meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    v0.0.82: Pokud TMDB film existuje na Webshare, vrat play-ready item
+    s variant_idents + TMDB plakatem. Jinak None (nezobrazovat).
+    """
+    title = (meta.get("title") or meta.get("original") or "").strip()
+    if not title:
+        return None
+    year_raw = meta.get("year")
+    try:
+        year = int(year_raw) if year_raw else None
+    except (TypeError, ValueError):
+        year = None
+
+    matching = _ws_files_for_tmdb_title(title, year=year)
+    if not matching:
+        return None
+
+    classify_files(matching)
+    variants = _files_to_variant_refs(matching)
+    if not variants:
+        return None
+
+    base_title = _normalize_title(variants[0].get("name") or title)
+    _save_variants_cache(base_title, "movie", variants)
+
+    best = variants[0]
+    is_dubbed = any(_detect_dubbed(v.get("name") or "") for v in variants)
+    has_subs = any(_detect_subtitles(v.get("name") or "") for v in variants)
+    ws_thumb = ""
+    for v in variants:
+        img = (v.get("img") or "").strip()
+        if img.startswith(("http://", "https://")):
+            ws_thumb = img
+            break
+
+    poster = meta.get("poster") or ws_thumb or None
+    fanart = meta.get("fanart") or poster
+
+    item = {
+        "id": "",
+        "title": title,
+        "title_localized": title,
+        "original_title": meta.get("original") or "",
+        "year": year or _guess_year(best.get("name") or ""),
+        "plot": meta.get("plot") or "",
+        "poster": poster,
+        "fanart": fanart,
+        "type": "movie",
+        "dubbed": is_dubbed,
+        "subs_cz": has_subs,
+        "base_title": base_title,
+        "variant_idents": [v["ident"] for v in variants],
+        "variants_count": len(variants),
+        "quality_score": max((_quality_score(v.get("name") or "") for v in variants),
+                             default=0),
+        "tmdb_id": meta.get("tmdb_id"),
+        "rating": float(meta.get("rating") or 0),
+        "votes": int(meta.get("votes") or 0),
+        "popularity": float(meta.get("popularity") or 0),
+    }
+    gids = list(meta.get("genre_ids") or [])
+    if gids:
+        from . import tmdb as _tmdb
+        item["genre_ids"] = gids
+        item["genre_names"] = _tmdb.genre_names_for_ids(gids, "movie")
+    if meta.get("_extra_plot"):
+        extra = str(meta["_extra_plot"]).strip()
+        if extra:
+            item["plot"] = extra + (
+                ("\n" + item["plot"]) if item.get("plot") else "")
+    return item
+
+
+def tmdb_series_meta_to_ws_item(meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """v0.0.82: Seriál z TMDB jen pokud existuje alespoň 1 epizoda na WS."""
+    title = (meta.get("title") or meta.get("original") or "").strip()
+    if not title:
+        return None
+    files = search_videos(query=title, sort="rating", page=1)
+    if not files:
+        return None
+    groups = _group_by_series(files)
+    target = _norm_compare(title)
+    for sname, fs in groups.items():
+        if not (_norm_compare(sname) == target or _title_tokens_match(title, sname)):
+            continue
+        variants = _files_to_variant_refs(fs)
+        if not variants:
+            continue
+        _save_variants_cache(sname, "series", variants)
+        item = {
+            "id": "",
+            "title": title,
+            "title_localized": title,
+            "year": meta.get("year"),
+            "plot": meta.get("plot") or "",
+            "poster": meta.get("poster") or None,
+            "fanart": meta.get("fanart") or meta.get("poster"),
+            "type": "series",
+            "series_name": sname,
+            "variant_idents": [v["ident"] for v in variants],
+            "variants_count": len(variants),
+            "tmdb_id": meta.get("tmdb_id"),
+            "rating": float(meta.get("rating") or 0),
+            "votes": int(meta.get("votes") or 0),
+            "popularity": float(meta.get("popularity") or 0),
+        }
+        gids = list(meta.get("genre_ids") or [])
+        if gids:
+            from . import tmdb as _tmdb
+            item["genre_ids"] = gids
+            item["genre_names"] = _tmdb.genre_names_for_ids(gids, "tv")
+        if meta.get("_extra_plot"):
+            extra = str(meta["_extra_plot"]).strip()
+            if extra:
+                item["plot"] = extra + (
+                    ("\n" + item["plot"]) if item.get("plot") else "")
+        return item
+    return None
+
+
+def filter_tmdb_movies_on_webshare(
+    metas: List[Dict[str, Any]],
+    max_workers: int = TMDB_WS_FILTER_WORKERS,
+    max_wait: float = TMDB_WS_FILTER_MAX_WAIT,
+) -> List[Dict[str, Any]]:
+    """Z TMDB seznamu vrati jen filmy dostupne na Webshare."""
+    if not metas:
+        return []
+    results: List[Dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(tmdb_movie_meta_to_ws_item, m) for m in metas]
+        pending = set(futures)
+        budget = float(max_wait)
+        while pending and budget > 0 and not _shutdown.is_shutting_down():
+            done, pending = wait(pending, timeout=min(0.5, budget))
+            budget -= 0.5
+            for fut in done:
+                try:
+                    item = fut.result()
+                    if item:
+                        results.append(item)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("tmdb_movie_meta_to_ws_item selhal: %s", exc)
+    log.info("filter_tmdb_movies_on_webshare: %d TMDB -> %d na WS",
+             len(metas), len(results))
+    return results
+
+
+def filter_tmdb_series_on_webshare(
+    metas: List[Dict[str, Any]],
+    max_workers: int = TMDB_WS_FILTER_WORKERS,
+    max_wait: float = TMDB_WS_FILTER_MAX_WAIT,
+) -> List[Dict[str, Any]]:
+    """Z TMDB seznamu vrati jen serialy dostupne na Webshare."""
+    if not metas:
+        return []
+    results: List[Dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(tmdb_series_meta_to_ws_item, m) for m in metas]
+        pending = set(futures)
+        budget = float(max_wait)
+        while pending and budget > 0 and not _shutdown.is_shutting_down():
+            done, pending = wait(pending, timeout=min(0.5, budget))
+            budget -= 0.5
+            for fut in done:
+                try:
+                    item = fut.result()
+                    if item:
+                        results.append(item)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("tmdb_series_meta_to_ws_item selhal: %s", exc)
+    log.info("filter_tmdb_series_on_webshare: %d TMDB -> %d na WS",
+             len(metas), len(results))
+    return results
+
+
+def filter_discovery_titles_on_webshare(
+    entries: List[Dict[str, Any]],
+    kind: str = "movie",
+    max_workers: int = TMDB_WS_FILTER_WORKERS,
+    max_wait: float = TMDB_WS_FILTER_MAX_WAIT,
+) -> List[Dict[str, Any]]:
+    """
+    v0.0.83: Obecny WS filtr pro discovery zdroje (Voyo, TV program, ...).
+    Vrati jen polozky s WS soubory + variant_idents.
+
+    :param entries: [{"title": str, "year": int|None, "poster": str, ...}]
+    :param kind: "movie" nebo "series"
+    """
+    if not entries:
+        return []
+    if kind == "series":
+        return filter_tmdb_series_on_webshare(entries, max_workers, max_wait)
+    return filter_tmdb_movies_on_webshare(entries, max_workers, max_wait)
 
 
 # ---------------------------------------------------------------------------

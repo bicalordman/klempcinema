@@ -96,9 +96,10 @@ def _static_fallback(item_type: str) -> str:
         return ""
 
 
-def _cache_key(title: str, year: Optional[int], item_type: str) -> str:
+def _cache_key(title: str, year: Optional[int], item_type: str,
+               genres: str = "") -> str:
     """Stabilni hash pro cache filename."""
-    raw = f"{title}|{year or 0}|{item_type}".encode("utf-8")
+    raw = f"{title}|{year or 0}|{item_type}|{genres or ''}".encode("utf-8")
     return hashlib.md5(raw).hexdigest()
 
 
@@ -207,7 +208,8 @@ def _get_font(size: int):
 
 
 def _generate(title: str, year: Optional[int],
-              item_type: str, dest_path: str) -> bool:
+              item_type: str, dest_path: str,
+              genres: Optional[str] = None) -> bool:
     """Vygeneruje placeholder s nazvem. Vrati True pri uspechu."""
     try:
         from PIL import Image, ImageDraw  # type: ignore
@@ -266,14 +268,26 @@ def _generate(title: str, year: Optional[int],
             # Hlavni text bily
             draw.text((x, y), line, fill=(255, 255, 255), font=font_title)
 
-        # Rok pod nazvem
+        # Rok + zanr pod nazvem
+        meta_y = y_start + total_h + 12
+        if genres:
+            genre_line = genres if len(genres) <= 42 else genres[:39] + "…"
+            try:
+                gw = draw.textlength(genre_line, font=font_meta)
+            except AttributeError:
+                gw, _ = draw.textsize(genre_line, font=font_meta)
+            draw.text(((W - gw) // 2 + 1, meta_y + 1), genre_line,
+                      fill=(0, 0, 0, 160), font=font_meta)
+            draw.text(((W - gw) // 2, meta_y), genre_line,
+                      fill=(200, 200, 220), font=font_meta)
+            meta_y += 36
         if year:
             year_str = f"({year})"
             try:
                 yw = draw.textlength(year_str, font=font_meta)
             except AttributeError:
                 yw, _ = draw.textsize(year_str, font=font_meta)
-            y_year = y_start + total_h + 12
+            y_year = meta_y
             draw.text(((W - yw) // 2 + 1, y_year + 1), year_str,
                       fill=(0, 0, 0, 160), font=font_meta)
             draw.text(((W - yw) // 2, y_year), year_str,
@@ -330,7 +344,8 @@ def _generate(title: str, year: Optional[int],
 
 
 def get_placeholder(title: str, year: Optional[int] = None,
-                    item_type: str = "movie") -> str:
+                    item_type: str = "movie",
+                    genres: Optional[str] = None) -> str:
     """
     Vrati cestu k placeholder posteru pro item:
       - vygenerovany per-item s nazvem uvnitr (pokud je PIL)
@@ -342,7 +357,7 @@ def get_placeholder(title: str, year: Optional[int] = None,
     if not _pil_available() or not title:
         return _static_fallback(item_type)
 
-    key = _cache_key(title, year, item_type)
+    key = _cache_key(title, year, item_type, genres or "")
     dest = os.path.join(_placeholder_dir(), f"{key}.png")
 
     if os.path.exists(dest):
@@ -352,7 +367,7 @@ def get_placeholder(title: str, year: Optional[int] = None,
         except OSError:
             pass
 
-    ok = _generate(title, year, item_type, dest)
+    ok = _generate(title, year, item_type, dest, genres=genres)
     if ok and os.path.exists(dest):
         return dest
 

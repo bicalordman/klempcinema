@@ -33,7 +33,7 @@
         <setting id="items_per_page"
                  type="slider"
                  label="32115"
-                 default="50"
+                 default="30"
                  range="10,10,100"
                  option="int"/>
         <setting id="search_history_enabled"

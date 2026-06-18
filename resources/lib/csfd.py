@@ -47,7 +47,7 @@ log = logging.getLogger("klempcinema.csfd")
 
 BASE = "https://www.csfd.cz"
 SEARCH_URL = "https://www.csfd.cz/hledat/?q={q}"
-TIMEOUT = 5  # v0.0.64: 6 -> 5s pro lepsi shutdown responsiveness
+TIMEOUT = 4  # v0.0.81: 4s (drive 5s) - rychlejsi shutdown
 
 HEADERS = {
     # Mobile Android Chrome UA - empirics: ČSFD Cloudflare pousti
