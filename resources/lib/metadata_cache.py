@@ -135,6 +135,20 @@ def save(title: str, data: Dict[str, Any]) -> None:
             pass
 
 
+def delete(title: str) -> bool:
+    """Smaže metadata pro jeden titul. True pokud soubor existoval."""
+    if not title:
+        return False
+    path = cache_path(title)
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            return True
+    except OSError as exc:
+        log.debug("metadata_cache.delete(%r) chyba: %s", title, exc)
+    return False
+
+
 def clear() -> int:
     """Smaže VŠECHNY uložené metadata JSONy. Vrací počet smazaných souborů."""
     d = _metadata_dir()

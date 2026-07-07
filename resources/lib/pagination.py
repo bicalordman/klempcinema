@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import cache
@@ -75,6 +76,7 @@ def paginate_with_fetcher(
     max_ws_pages: int = DEFAULT_MAX_WS_PAGES,
     sort_key: Optional[Callable[[Any], Any]] = None,
     ttl_override: Optional[int] = None,
+    max_wait_sec: Optional[float] = None,
 ) -> Tuple[List[Any], bool]:
     """
     Vrátí výsek pro UI stránku 'ui_page' a flag 'has_more'.
@@ -82,6 +84,13 @@ def paginate_with_fetcher(
     v0.0.83: page_slices[str(page)] = frozen list stable IDs.
     Pri prvnim otevreni stranky N se z neprirazenych polozek vybere
     top page_size dle sort_key. Drivejsi stranky se nemeni.
+
+    :param max_wait_sec: v0.0.130 - globalni wall-clock strop na cely
+                         fetch cyklus. Kazda WS stranka spousti enrich
+                         (az ENRICH_MAX_WAIT_SEC), takze bez tohoto stropu
+                         se cas scital linearne s max_ws_pages (40s+).
+                         Po vycerpani rozpoctu se vrati to, co uz mame,
+                         zbytek dotahne prefetch/dalsi otevreni.
     """
     page_size = _read_ui_page_size()
     effective_ttl = ttl_override if ttl_override is not None else AGG_TTL
@@ -106,11 +115,23 @@ def paginate_with_fetcher(
 
     assigned = _assigned_ids(page_slices)
     fetched_now = 0
+    t_start = time.monotonic()
 
     def _pool_size() -> int:
         return len(items_by_id)
 
+    def _budget_left() -> bool:
+        if max_wait_sec is None:
+            return True
+        return (time.monotonic() - t_start) < max_wait_sec
+
     while len(assigned) < needed_assigned and not exhausted and fetched_now < max_ws_pages:
+        if not _budget_left():
+            log.info("paginate(%s): casovy budget %.1fs vycerpan po %d WS strankach "
+                     "(pool=%d, assigned=%d) - vracim co mam",
+                     cache_key, max_wait_sec or 0, fetched_now,
+                     _pool_size(), len(assigned))
+            break
         log.debug("paginate(%s): fetch WS page %d (pool=%d, assigned=%d, need=%d)",
                   cache_key, next_ws_page, _pool_size(), len(assigned),
                   needed_assigned)
@@ -215,12 +236,33 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s.lower()).strip()
 
 
+_YEAR_IN_ITEM_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
+
+
+def _year_from_item(it: Dict[str, Any]) -> int:
+    """Rok z metadat nebo z WS nazvu - kratke tituly jako Michael."""
+    try:
+        y = int(it.get("year") or 0)
+    except (TypeError, ValueError):
+        y = 0
+    if y > 0:
+        return y
+    for field in ("ws_names", "base_title", "title", "title_localized"):
+        m = _YEAR_IN_ITEM_RE.search(it.get(field) or "")
+        if m:
+            try:
+                return int(m.group(1))
+            except ValueError:
+                pass
+    return 0
+
+
 def _stable_item_id(it: Dict[str, Any]) -> str:
     tid = it.get("tmdb_id")
     if tid:
         return f"tmdb:{tid}"
 
-    year = it.get("year") or ""
+    year = _year_from_item(it)
     base = _norm(
         it.get("base_title") or it.get("series_name")
         or it.get("title_localized") or it.get("title") or ""
@@ -292,15 +334,14 @@ def _item_keys(it: Dict[str, Any]) -> List[str]:
     if tid:
         keys.append(f"tmdb:{tid}")
 
-    year = it.get("year")
+    year = _year_from_item(it)
     orig = _norm(it.get("original_title") or "")
     if orig:
-        keys.append(f"orig:{orig}|{year or ''}")
+        keys.append(f"orig:{orig}|{year}")
 
     base = _norm(it.get("base_title") or "")
     if base:
-        keys.append(f"base:{base}|{year or ''}")
-        keys.append(f"base:{base}|")
+        keys.append(f"base:{base}|{year}")
 
     sname = _norm(it.get("series_name") or "")
     if sname:
@@ -308,12 +349,12 @@ def _item_keys(it: Dict[str, Any]) -> List[str]:
 
     loc = _norm(it.get("title_localized") or "")
     if loc and loc != base:
-        keys.append(f"loc:{loc}|{year or ''}")
+        keys.append(f"loc:{loc}|{year}")
 
     if not keys:
         title = _norm(it.get("title") or "")
         if title:
-            keys.append(f"fb:{title}|{year or ''}")
+            keys.append(f"fb:{title}|{year}")
 
     return keys
 

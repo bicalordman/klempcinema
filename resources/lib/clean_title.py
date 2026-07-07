@@ -243,9 +243,16 @@ def clean_title(name: str, *, keep_series_marker: bool = False) -> str:
     # 1) Přípona
     s = _EXT_RE.sub("", s)
 
-    # 2) Tečky/podtržítka/pomlčky/závorky → mezery (PŘED hledáním markerů,
-    #    aby _QUALITY_RE\b atd. matchovaly i 'Joker.2019' style).
+    # 1b) v0.0.132: audio kanály (5.1 / 7.1 / 2.0) PŘED převodem teček na
+    #     mezery - jinak zbyde "5 1", co v kroku 6 splete sekvenční číslo
+    #     (a "Vyšehrad 5.1" by skončil jako "Vyšehrad 5").
+    s = re.sub(r"(?<!\d)[2-8]\.[01](?:\.\d)?(?!\d)", " ", s)
+
+    # 2) Tečky/podtržítka/pomlčky/závorky/čárky → mezery (PŘED hledáním
+    #    markerů, aby _QUALITY_RE\b atd. matchovaly i 'Joker.2019' style).
+    #    v0.0.132: i čárka - uploadeři lepí "Nazev zanr1,zanr2" (WS konvence).
     s = s.replace(".", " ").replace("_", " ").replace("-", " ")
+    s = s.replace(",", " ")
     s = re.sub(r"[\(\)\[\]\{\}]", " ", s)
 
     # 2b) Specialni kombinace AI prekladu (PRED hledanim markeru) - smaze
@@ -339,20 +346,81 @@ def clean_title(name: str, *, keep_series_marker: bool = False) -> str:
     if re.search(r"[A-Za-z\u00c0-\u017f]{2,}", cand):
         s = cand
 
-    # 6) Vyhodi zbyle "samostatna cisla na konci" (typicky "Vyšehrad 5 1"
-    #    z audio "5.1" co prosakl pres cut, nebo "Joker 02"). Bezpecnostni
-    #    gate: po orezu musi zustat aspon 1 pismenne slovo s 2+ znaky.
-    JUNK_END = re.compile(r"\s+\d{1,3}$")
-    while True:
-        m = JUNK_END.search(s)
-        if not m:
+    # 5c) v0.0.132: Ořež KONCOVÉ žánrové / popisné slovo-přívěsky, které
+    #     uploadeři lepí za název (WS konvence "Nazev komedie",
+    #     "Nazev akcni dobrodruzny fantasy", "Nazev NEW"). Sabotují
+    #     TMDB i ČSFD match. Porovnává se ASCII-fold lowercase, takže
+    #     "akční" i "akcni" projdou. Gate: musí zůstat aspoň 1 reálné slovo.
+    s = _strip_trailing_genre_words(s)
+
+    # 6) Vyhodi zbyle "junk" cisla na konci: audio zbytky ("5 1"),
+    #    leading-zero party ("02"), prosakle roky. ALE v0.0.132 zachovej
+    #    pravdepodobne SEKVENCNI cislo (2, 3, 11) - "Rocky 4",
+    #    "Mortal Kombat 2" nesmi prijit o cislo (jinak spatny TMDB match).
+    #    Bezpecnostni gate: po orezu musi zustat aspon 1 pismenne slovo.
+    tokens = s.split()
+    while len(tokens) > 1 and tokens[-1].isdigit():
+        last = tokens[-1]
+        prev = tokens[-2]
+        # Pravdepodobny sekvel: 1-3 cislice, bez leading zero, nepredchazi
+        # dalsi cislo (to by byl audio zbytek "5 1").
+        if len(last) <= 3 and last[0] != "0" and not prev.isdigit():
             break
-        candidate = s[:m.start()].strip(" .-_,;:")
-        if not re.search(r"[A-Za-z\u00c0-\u017f]{2,}", candidate):
+        candidate = tokens[:-1]
+        if not any(re.search(r"[A-Za-z\u00c0-\u017f]{2,}", t) for t in candidate):
             break
-        s = candidate
+        tokens = candidate
+    s = " ".join(tokens)
 
     return s
+
+
+# v0.0.132: Žánrová / popisná slova, která uploadeři lepí ZA název filmu.
+# Porovnává se ASCII-fold lowercase forma (viz _strip_trailing_genre_words),
+# takže sem stačí ASCII varianty bez diakritiky.
+_GENRE_JUNK_WORDS = frozenset({
+    "komedie", "komedialni", "komediant",
+    "drama", "dramaticky", "dramaticke",
+    "thriller", "thrillery", "triler",
+    "horor", "horory",
+    "scifi", "sci", "fi",
+    "fantasy", "fantazie",
+    "akcni", "akce", "akcny",
+    "dobrodruzny", "dobrodruzne", "dobrodruzstvi",
+    "romanticky", "romanticka", "romanticke", "romance", "romantika",
+    "animovany", "animovane", "animovana", "animak", "animovany",
+    "dokument", "dokumentarni", "dokumentary",
+    "rodinny", "rodinne", "rodinna",
+    "krimi", "kriminalni", "kriminalka",
+    "mysteriozni", "mysteriozny", "tajemno", "mystery",
+    "valecny", "valecne",
+    "western",
+    "muzikal", "musical",
+    "historicky", "historicke",
+    "zivotopisny", "biograficky", "biography",
+    "katastroficky",
+    "psychologicky",
+    "pohadka", "pohadky", "pohadkovy",
+    "new", "novy", "nove",
+})
+
+
+def _strip_trailing_genre_words(s: str) -> str:
+    """Ořeže koncové žánrové/popisné tokeny (viz _GENRE_JUNK_WORDS).
+
+    Gate: po ořezu musí zůstat aspoň jedno reálné slovo (2+ písmen),
+    aby se nezničily legitimní tituly jako 'Drama' nebo 'Western'.
+    """
+    if not s:
+        return s
+    tokens = s.split()
+    while len(tokens) > 1:
+        last = ascii_fold(tokens[-1]).lower().strip(" .-_,;:+")
+        if last in _GENRE_JUNK_WORDS:
+            tokens = tokens[:-1]
+            continue
+        break
+    return " ".join(tokens)
 
 
 # ---------------------------------------------------------------------------

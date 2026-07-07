@@ -113,9 +113,24 @@ def _sanitize_title(title: str, max_len: int = 60) -> str:
 
 # Barvy podle typu (gradient od stred-light po okraj-dark)
 _COLORS = {
-    "movie":  ((45, 30, 90),  (15, 8, 35)),    # fialovo-modra
-    "series": ((30, 65, 90),  (10, 25, 40)),   # tealova
+    "movie":   ((45, 30, 90),  (15, 8, 35)),    # fialovo-modra
+    "series":  ((30, 65, 90),  (10, 25, 40)),   # tealova
+    "concert": ((120, 25, 70), (30, 5, 20)),    # purpurovo-magenta (podium)
 }
+
+# Popisek typu v horni pill + volba barvy gradientu.
+_TYPE_STYLE = {
+    "series":  ("series",  "TV"),
+    "tvshow":  ("series",  "TV"),
+    "episode": ("series",  "TV"),
+    "concert": ("concert", "KONCERT"),
+    "movie":   ("movie",   "FILM"),
+}
+
+
+def _style_for(item_type: str):
+    """Vrati (color_key, icon_text) pro dany typ polozky."""
+    return _TYPE_STYLE.get((item_type or "movie"), _TYPE_STYLE["movie"])
 
 
 def _gradient_bg(w: int, h: int, color_in, color_out):
@@ -218,10 +233,8 @@ def _generate(title: str, year: Optional[int],
 
     try:
         W, H = 600, 900
-        c_in, c_out = _COLORS.get(
-            "series" if item_type in ("series", "tvshow", "episode") else "movie",
-            _COLORS["movie"],
-        )
+        color_key, icon_text = _style_for(item_type)
+        c_in, c_out = _COLORS.get(color_key, _COLORS["movie"])
         img = _gradient_bg(W, H, c_in, c_out)
         draw = ImageDraw.Draw(img)
 
@@ -293,8 +306,7 @@ def _generate(title: str, year: Optional[int],
             draw.text(((W - yw) // 2, y_year), year_str,
                       fill=(255, 215, 80), font=font_meta)
 
-        # Typ icon nahore (film / TV) - jednoduchy symbol
-        icon_text = "TV" if item_type in ("series", "tvshow", "episode") else "FILM"
+        # Typ icon nahore (FILM / TV / KONCERT) - jednoduchy symbol
         try:
             iw = draw.textlength(icon_text, font=font_meta)
         except AttributeError:

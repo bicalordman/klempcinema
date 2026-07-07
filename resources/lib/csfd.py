@@ -497,15 +497,25 @@ def _pick_candidate(
     best_score = -1
     best_title_score = 0
     best_year_score = 0
+    from .title_match import title_similarity
     for c in candidates:
         title_score = 0
-        cand_norm = re.sub(r"\W+", "", (c.get("title") or "").lower())
+        cand_title = c.get("title") or ""
+        cand_norm = re.sub(r"\W+", "", cand_title.lower())
         if cand_norm == target_norm:
             title_score = 100
         elif cand_norm.startswith(target_norm) or target_norm.startswith(cand_norm):
             title_score = 60
         elif target_norm in cand_norm or cand_norm in target_norm:
             title_score = 30
+        else:
+            sim = title_similarity(target_title, cand_title)
+            if sim >= 0.92:
+                title_score = max(title_score, 95)
+            elif sim >= 0.80:
+                title_score = max(title_score, int(65 + sim * 30))
+            elif sim >= 0.65:
+                title_score = max(title_score, int(35 + sim * 25))
 
         year_score = 0
         if target_year and c.get("year") == target_year:
@@ -599,6 +609,14 @@ def _search_csfd(title: str, year: Optional[int] = None,
 
     # 1) Cesky clean title (i s diakritikou) - FIRST try
     attempts.append(clean)
+    fixed = None
+    try:
+        from .title_match import apply_typo_fixes
+        fixed = apply_typo_fixes(clean)
+        if fixed.lower() != clean.lower():
+            attempts.append(fixed)
+    except Exception:  # noqa: BLE001
+        pass
     # 2) ASCII-fold (bez diakritiky) - 2. pokus
     if folded.lower() != clean.lower():
         attempts.append(folded)
@@ -606,6 +624,13 @@ def _search_csfd(title: str, year: Optional[int] = None,
     if (letters and letters.lower() != clean.lower()
             and letters.lower() != folded.lower() and len(letters) >= 3):
         attempts.append(letters)
+    try:
+        from .title_match import extra_search_queries
+        for q in extra_search_queries(clean, year):
+            if q and q not in attempts:
+                attempts.append(q)
+    except Exception:  # noqa: BLE001
+        pass
 
     # Deduplicate
     seen: set = set()
@@ -764,12 +789,74 @@ def _merge_meta(item: Dict[str, Any], meta: Dict[str, Any]) -> None:
         item["csfd_id"] = meta["csfd_id"]
 
 
+def prefill_movie_item_from_cache(item: Dict[str, Any]) -> bool:
+    """v0.0.112: Hydratuje film z diskove ČSFD cache bez site."""
+    if not is_enabled():
+        return False
+    if item.get("csfd_url") and (item.get("csfd_poster") or item.get("poster")):
+        return True
+    title = item.get("base_title") or item.get("title") or ""
+    if not title:
+        return False
+    year = item.get("year")
+    if not year:
+        year = _ct.extract_year(title)
+    try:
+        from .title_match import title_search_variants
+        titles = title_search_variants(title, year)
+    except Exception:  # noqa: BLE001
+        titles = [title]
+    seen_keys: set = set()
+    for t in titles:
+        clean = _ct.clean_title(t)
+        if not clean:
+            continue
+        years: List[Any] = []
+        if year:
+            years.append(year)
+        gy = _ct.extract_year(t)
+        if gy and gy not in years:
+            years.append(gy)
+        years.append("")
+        for y in years:
+            key = f"csfd:v6:film:{clean.lower()}:{y or ''}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            cached = cache.cache_get(key, ttl=HIT_TTL)
+            if not cached or not isinstance(cached, dict) or not cached:
+                continue
+            _merge_meta(item, cached)
+            if item.get("csfd_poster") or item.get("poster"):
+                return True
+    return bool(item.get("csfd_poster") or item.get("poster"))
+
+
+def prefill_series_item_from_cache(item: Dict[str, Any]) -> bool:
+    """v0.0.112: Hydratuje serial z diskove ČSFD cache bez site."""
+    if not is_enabled():
+        return False
+    if item.get("csfd_url") and (item.get("csfd_rating") or item.get("csfd_poster")):
+        return True
+    title = item.get("title") or ""
+    if not title:
+        return False
+    clean = _ct.clean_title(title)
+    if not clean:
+        return False
+    key = f"csfd:v6:tv:{clean.lower()}:"
+    cached = cache.cache_get(key, ttl=HIT_TTL)
+    if not cached or not isinstance(cached, dict):
+        return False
+    _merge_meta(item, cached)
+    return bool(item.get("csfd_url") or item.get("csfd_poster") or item.get("poster"))
+
+
 def enrich_movie_item(item: Dict[str, Any]) -> Dict[str, Any]:
     if not is_enabled():
         return item
-    # v0.0.62: SHORTCUT - pokud uz mame csfd_url + csfd_rating, drive
-    # bezel ČSFD lookup, neopakovat (setri Cloudflare bot detection).
-    if item.get("csfd_url") and (item.get("csfd_rating") or item.get("csfd_poster")):
+    # v0.0.62: SHORTCUT - skip pokud uz mame CSFD data vcetne plakatu
+    if item.get("csfd_url") and (item.get("csfd_poster") or item.get("poster")):
         return item
     try:
         meta = search_movie(item.get("title") or "", item.get("year"))
@@ -783,8 +870,7 @@ def enrich_movie_item(item: Dict[str, Any]) -> Dict[str, Any]:
 def enrich_series_item(item: Dict[str, Any]) -> Dict[str, Any]:
     if not is_enabled():
         return item
-    # v0.0.62: SHORTCUT - skip pokud uz mame CSFD data
-    if item.get("csfd_url") and (item.get("csfd_rating") or item.get("csfd_poster")):
+    if item.get("csfd_url") and (item.get("csfd_poster") or item.get("poster")):
         return item
     try:
         meta = search_tv(item.get("title") or "")

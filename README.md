@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.84**
+**Aktuální verze: 0.0.137**
 
 ---
 
@@ -22,12 +22,14 @@ Doplněk funguje bez reklam, bez sběru dat. Veškerý obsah je stahován přím
 - Trending, žánry, streamovací platformy (Netflix/HBO/Disney+...)
 - Seriály s rozdělením na sezóny a díly
 - TV program dnes (zdroj iDNES + TMDB plakáty)
-- Voyo (SK) - Markíza pořady
+- Voyo (SK) pořady
 - Animované CZ/SK filmy
 - Pohádky CZ/SK
+- Koncerty (CZ/SK i zahraniční, filtrování podle žánru)
+- Dokumentární filmy (oddělené od koncertů)
 - České titulky (OpenSubtitles.org)
 - Pokračovat ve sledování / historie
-- Kontextové menu (skenování ČSFD, trailer, smazat...)
+- Kontextové menu (trailer, ČSFD, obnovit metadata, titulky…)
 
 ---
 
@@ -53,13 +55,13 @@ Plugin stahuje metadata (plakáty, hodnocení) z TMDB a ČSFD. První otevření
 |-----------|-----|-------|
 | **Přeskočit enrich** | Nastavení doplňku → TMDB | Nejrychlejší režim — seznamy bez plakátů a hodnocení |
 | **Položek na stránku** | Nastavení doplňku → Přehrávání | Snížit na 20 pro slabší zařízení (Xbox, RPi) |
-| **Vypnout ČSFD** | Nastavení doplňku → ČSFD | Méně síťových dotazů (od v0.0.81 se ČSFD na seznamech volá jen jako fallback) |
+| **Vypnout ČSFD** | Nastavení doplňku → ČSFD | Méně síťových dotazů (ČSFD se na seznamech volá jen jako fallback) |
 
-### Co se děje na pozadí (v0.0.81+)
+### Co se děje na pozadí
 
-- **Časový limit enrich** — seznam se zobrazí do ~6 sekund, i když metadata ještě nedoběhla pro všechny položky
-- **ČSFD jen fallback** — pokud TMDB vrátí plakát a hodnocení, ČSFD se na seznamu nevolá (úspora 1–3 s na film)
-- **Kratší timeouty** — při vypínání Kodi plugin nečeká tak dlouho na síťové odpovědi
+- **Časový limit enrich** — seznam se zobrazí do několika sekund, i když metadata ještě nedoběhla pro všechny položky
+- **ČSFD jen fallback** — pokud TMDB vrátí plakát a hodnocení, ČSFD se na seznamu nevolá
+- **Kratší timeouty** — při vypínání Kodi plugin nečeká dlouho na síťové odpovědi (neblokující ukončení thread poolů)
 - **Prefetch** — další stránka se načítá na pozadí, zatímco prohlížíš aktuální
 
 ---
@@ -119,112 +121,132 @@ Pro hlášení chyb a návrhy — kontaktuj kanál odkud jsi doplněk získal.
 
 ## Změny
 
-### v0.0.84 — Oprava instalace (zkrácený changelog v addon.xml)
+Kompletní historie od poslední veřejné verze **0.0.84** po aktuální **0.0.137**.
 
-**Problém:** ZIP `0.0.83` nešel v některých Kodi nainstalovat (chyba „neplatná struktura“ nebo instalace se neukončí).
+### Souhrn 0.0.84 → 0.0.137
 
-**Příčina:** Soubor `addon.xml` obsahoval changelog **~98 KB** (přes 2000 řádků v `<news>`). Některé Kodi buildy (Android TV, Xbox, starší verze) při parsování manifestu selžou.
+| Oblast | Hlavní změny |
+|--------|----------------|
+| Instalace | Oprava ZIP a `addon.xml`, spolehlivé `build_zip.ps1` |
+| Architektura | Refaktor routeru do `views/` + `router_common.py` |
+| Seriály / Voyo | Oprava prázdných seznamů, epizody bez SxxEyy, slovenské markery |
+| TV program | Nové sekce, HBO/placené kanály, plakáty, deduplikace |
+| Koncerty | Nová rubrika, hledání, CZ/SK kapely, vlastní plakáty, stránkování |
+| Filmy / dabing | Hledání s rokem, detekce CZ audia, picker kvality, novinky |
+| Metadata | Sdílená cache, auto-heal překlepů, ČSFD záchrana plakátů |
+| Výkon | Globální strop ~12 s, RAM cache, rychlé vypínání Kodi |
+| Nové rubriky | Dokumentární filmy CZ/SK (odděleně od koncertů) |
 
-**Oprava:**
-- Changelog v `addon.xml` zkrácen na poslední verze (0.0.79–0.0.84)
-- Kompletní historie změn zůstává v tomto **README.md**
-- Funkčnost 0.0.83 beze změny (žánry v popisku, WS filtr, Michael, stránkování)
+---
 
-**Instalace:** Použij `plugin.video.klempcinema-0.0.84.zip`. Pokud máš rozbitou 0.0.83, nejdřív **odinstaluj** starý doplněk, pak nainstaluj 0.0.84 (přihlašovací údaje v `userdata/addon_data` zůstanou).
+### v0.0.137 — Plynulejší listování koncertů
 
-### v0.0.83 — Voyo + TV program WS filtr + Michael v Nových dabovaných + žánry v popisku
+- Kratší časový rozpočet načítání + prefetch další stránky stihne doběhnout
 
-#### Webshare filtr i pro Voyo a TV program
+### v0.0.136 — Rychlejší vypínání Kodi + CZ koncerty
 
-V **v0.0.82** se ověření existence souboru na Webshare týkalo jen TMDB rubrik (Trendy, Žánry, Platformy). Po kliknutí ve **Voyo (SK)** nebo **TV program dnes** mohly zůstat položky bez souboru na Webshare.
+- Neblokující ukončení thread poolů
+- Databáze CZ/SK kapel (rock, metal, folk, country, pop, rap) pro vyhledávání na Webshare
 
-**Oprava:** Stejný princip jako u TMDB rubrik — před zobrazením se každá položka ověří na Webshare. Zůstanou jen tituly s `variant_idents` (film → quality picker / přehrání, seriál → sezóny a díly).
+### v0.0.135 — Stabilní stránkování koncertů
 
-#### Michael zmizel z rubriky Nově dabované
+- Filtrování před rozdělením na stránky (30 položek/stránku), plakáty nahoře, plná cache
 
-**Příčina 1 — špatný rok z TMDB:** Při enrichi TMDB někdy přiřadí jiný film se stejným názvem (např. starší „Michael“ místo dokumentu 2026). Post-filter s minimem roku 2024 tak správný titul vyhodil.
+### v0.0.134 — Vlastní plakáty koncertů
 
-**Oprava:** `_effective_release_year` bere **maximum** roku z TMDB, názvu WS souboru a variant — novější rok má přednost.
+- Placeholder plakát pro koncerty; dokumenty vyřazeny z koncertní rubriky
 
-**Příčina 2 — stránkování po dávkách:** Stránkování v0.0.82 řadilo jen aktuální dávku. Globálně nový film mohl skončit až na 5. stránce místo na správném místě.
+### v0.0.133 — Rychlé vypínání Kodi
 
-**Oprava:** **Frozen `page_slices`** — každá stránka se při prvním otevření seřadí z **celého poolu**, ne jen z poslední dávky.
+- Oprava `lifecycle` úklidu (chybějící import `threading`)
 
-**Po upgrade:** V rubrice **Nově dabované** klikni **Aktualizovat** (cache `v5` → `v6`).
+### v0.0.132 — Víc plakátů
 
-#### Žánr u každého filmu a seriálu
+- Čištění názvů souborů od žánrů a technických značek pro lepší TMDB match
 
-U všech seznamů včetně **vyhledávání**, rubrik a TMDB položek se po TMDB enrichi zobrazí žánr (české názvy z TMDB API).
+### v0.0.131 — ČSFD záchrana plakátů
 
-| Kde | Co se zobrazí |
-|-----|----------------|
-| **Popisek (plot)** | řádek `Žánr: Drama, Akční, …` (nad hodnocením a popisem děje) |
-| **Kodi info pole `genre`** | stejná hodnota pro info panel skinu |
-| **Placeholder plakát** | žánr pod názvem (jen když TMDB plakát chybí a vygeneruje se vlastní obrázek) |
+- Cílené doplnění plakátů pro české tituly, které TMDB nenajde (max 5 položek, 3 s)
 
-**V názvu řádku** (vedle plakátu) žánr **není** — název zůstává ve formátu: titul, rok, TMDB ★, ČSFD %, `[CZ]` / `[CZ tit]`, technické badges (`1080p`, `HEVC`…).
+### v0.0.130 — Globální časový strop
 
-**Požadavek:** TMDB API klíč v nastavení doplňku (bez klíče žánry ani plakáty z TMDB nejsou).
+- Načítání rubriky max ~12 s místo 40 s+; rychlejší i další stránky
 
-**Technicky:** TMDB vrací `genre_ids` → plugin je mapuje přes `/genre/movie/list` a `/genre/tv/list` (cache 7 dní). Platí pro filmy i seriály včetně discover/trending položek po WS filtru.
+### v0.0.128–0.0.129 — Zrychlení filmových rubrik
 
-### v0.0.82 — Rubriky: jen filmy na Webshare + fix opakování po str. 3
+- Bez ČSFD brzdy při prvním načtení; jen TMDB plakáty; verze 129 = stejné + oprava instalace
 
-**Problém 1:** V rubrikách se zobrazovaly filmy bez souboru na Webshare (plakát z TMDB, ale po kliknutí „nenalezeno“).
+### v0.0.127 — Přísnější shoda WS ↔ TMDB
 
-**Příčina:** Rubriky Trendy / Žánry / Platformy braly seznam z TMDB bez ověření na Webshare. U WS rubrik mohly po enrich/dedup zůstat položky bez `variant_idents`.
+- Sequel hint jen s číslem dílu v názvu; kontrola kompatibility názvu souboru a metadat
 
-**Opravy:**
-- **TMDB rubriky** — před zobrazením se každý film/seriál ověří na Webshare; bez souboru se nezobrazí
-- **WS rubriky** — filtr `_filter_with_webshare_files`: jen položky s `variant_idents`
-- Nový upload na Webshare se objeví po **Aktualizovat** v rubrice nebo po vypršení cache (30 min)
+### v0.0.126 — Stabilita při dlouhém používání
 
-**Problém 2:** Po 3. stránce se filmy v některých rubrikách opakovaly.
+- Úklid po navigaci, limit RAM cache, image workery, jeden TV program fetch na pozadí
 
-**Příčina:** Při načítání další stránky se celý buffer znovu seřadil (podle plakátu/hodnocení) — položky ze str. 1 „skočily“ na str. 3.
+### v0.0.125 — Dokumentární filmy + koncerty
 
-**Oprava:** Stabilní stránkování (`display_order` append-only) — dříve přiřazené položky se už nepřerovnávají.
+- Nová rubrika **Filmy dokumentární CZ/SK**; dokumenty vyřazeny z koncertů; oprava TMDB žánru Hudba
 
-### v0.0.81 (15. 6. 2026) — Rychlejší načítání + rychlejší shutdown Kodi
+### v0.0.124 — TV program bez duplicit
 
-**Problém:** Rubriky se načítaly pomalu (desítky sekund). Kodi se po instalaci doplňku pomalu vypínalo.
+- Deduplikace položek (kanál + čas + titul) u placených kanálů
 
-**Příčina:** Plugin čekal na metadata (TMDB + ČSFD) pro každou položku *před* zobrazením seznamu. ČSFD scraping trvá 1–3 s na film; při 50 položkách to bylo extrémně pomalé.
+### v0.0.123 — Rychlejší plakáty (TV program, platformy)
 
-**Opravy:**
-- **ČSFD na seznamech jen jako fallback** — volá se jen když TMDB nevrátil plakát nebo hodnocení (dříve pro každou položku)
-- **Časový limit enrich 6 s** — seznam se zobrazí i když metadata ještě nedoběhla pro všechny položky
-- **Default 30 položek na stránku** (dříve 50) — rychlejší první načtení
-- **Kratší síťové timeouty** — Webshare 5 s, OpenSubtitles 5 s, TMDB/ČSFD 4 s, obrázky 2 s → rychlejší vypínání Kodi
-- **UpdateLocalAddons po upgrade na pozadí** — neblokuje otevření menu po instalaci nové verze
+- TMDB plakáty hned při otevření; platformy zobrazí celý TMDB seznam s plakáty
 
-**Tip:** Druhé otevření stejné rubriky je okamžité (cache 30 min). Pro nejrychlejší režim zapni v Nastavení **Přeskočit enrich**.
+### v0.0.122 — Auto-heal metadat
 
-### v0.0.80 (15. 6. 2026) — i18n: English fallback pro welcome + donate
+- Automatické opravy překlepů a sequel hintů bez ručního „Obnovit metadata“
 
-- Přidán kompletní **anglický překlad** (`resource.language.en_gb/strings.po`, 159 klíčů). Uživatelé s Kodi v angličtině teď uvidí všechny texty anglicky.
-- **Donate dialog** plně lokalizovaný — dříve byly IBAN řádky a návod na poslání daru hardcoded v češtině. Nyní 13 řádek dialogu prochází přes `_tr_safe()` (klíče 30240–30250).
-- **Welcome flow** fallbacky změněny z češtiny na angličtinu (matchují `msgid` v `strings.po`), takže jakýkoli neznámý jazyk v Kodi dostane anglický fallback místo nečitelné češtiny.
-- **Login error texty** (`WRONG PASSWORD`, `USER DOES NOT EXIST`, …) lokalizovány přes klíče 30260–30267.
+### v0.0.121 — Obnovit metadata + překlepy
 
-### v0.0.79 — Rychlejší shutdown + UI bug u daru
+- Rok se posílá i při obnově; opravy překlepů v názvech; přísnější shoda epizod
 
-- Sníženy síťové timeouty (Webshare 15s→8s, OpenSubtitles 25s→8s, image cache 10s→3s) — Kodi shutdown trvá max ~8s místo 30s.
-- Shutdown-aware threading: žádné nové síťové requesty po `shutdown.is_shutting_down()`.
-- Asynchronní fetch titulků (`subtitles.attach_async`) — video startuje ihned, titulky se připojí na pozadí. Fix race condition s flickerem a uvíznutou myší.
-- Auto-refresh ikon pluginu po upgrade (`UpdateLocalAddons`) + manuální tlačítko **Nástroje → Obnovit ikony pluginu**.
-- Donate položka v hlavním menu zvýrazněna (zlatá, tučně, ♥).
+### v0.0.119–0.0.120 — Voyo epizody
 
-### v0.0.76–0.0.78 — Donate + welcome flow + nová ikona
+- Rozpoznání `epizoda 1`, `díl 5`, `1. diel` bez SxxEyy; volnější shoda názvu seriálu
 
-- První-spuštění welcome dialog pro zadání Webshare účtu (bezpečné — žádné hardcoded credentials).
-- Donate dialog s QR kódem (SPD formát) + textovým fallbackem.
-- Nová vizuální identita: zlatá kamera ikona + červená divadelní fanart + custom dárek ikona pro donate.
-- Author rebranding: „Honza" → **„Bicalorman"**.
+### v0.0.118 — Obnovit metadata, testy
 
-### v0.0.74–0.0.75 — Quality picker fix
+- Context menu **Obnovit metadata**; fuzzy match; unit testy (`run_tests.ps1`)
 
-- Oprava bugu kde quality picker zobrazoval i nepřesné shody (např. „Michael Jordan" při hledání „Michael"). Nyní precizní tokenizované porovnání.
+### v0.0.114–0.0.117 — Plakáty a přehrávání
+
+- RAM cache, paralelní stahování plakátů; WS thumb ≠ plakát; rok jen po TMDB matchi
+
+### v0.0.108–0.0.113 — Picker kvality
+
+- Filtr podle roku; kratší řádky; zobrazení zvuku (5.1, DTS, 6CH…)
+
+### v0.0.100–0.0.107 — Hledání a dabing
+
+- Oprava deduplikace; detekce `CZ.dub` a `.CZ.5.1`; hledání v rubrikách; CZ-only picker z dabovaných
+
+### v0.0.98–0.0.99 — Hledání s rokem
+
+- Rok z klávesnice; oprava Novinek a Novinek dabovaných; hledání v rubrikách Filmy/Novinky
+
+### v0.0.92–0.0.97 — Koncerty
+
+- Nová rubrika (CZ/SK, zahraniční, žánry, hledání); vlastní pipeline hledání; víc českých koncertů
+
+### v0.0.88–0.0.91 — Seriály, Voyo, TV program
+
+- Striktní shoda epizod; Voyo celý katalog; TV program se sekcemi a HBO na pozadí
+
+### v0.0.85–0.0.87 — Instalace a seriály
+
+- Refaktor routeru; Kodi-kompatibilní ZIP; oprava prázdných Seriálů (`variant_idents`)
+
+### v0.0.84 — Oprava instalace
+
+- Zkrácený changelog v `addon.xml` (některá Kodi buildy neuměly parsovat velký manifest)
+
+### Starší verze (0.0.76–0.0.83)
+
+- Donate + welcome flow; rychlejší shutdown; jen tituly na Webshare; žánry v popisku; stabilní stránkování
 
 ---
 

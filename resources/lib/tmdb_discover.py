@@ -23,13 +23,24 @@ log = logging.getLogger("klempcinema.tmdb_discover")
 
 DEFAULT_TTL = 6 * 3600   # 6h - trending list se nemění tak často
 
+TMDB_GENRE_MUSIC = 10402
+TMDB_GENRE_DOCUMENTARY = 99
 
-def _fill_images_if_missing(tmdb_id, poster_path, fanart_path, kind):
-    """Pokud cs-CZ verze nemá obrázky, vrátí (poster, fanart) z best-available."""
+
+def _fill_images_if_missing(tmdb_id, poster_path, fanart_path, kind, *,
+                            lazy: bool = False):
+    """Pokud cs-CZ verze nemá obrázky, vrátí (poster, fanart) z best-available.
+
+    lazy=True: seznamy (platformy/trending) – bez extra TMDB dotazu na fanart.
+    """
     if not tmdb_id:
+        return (poster_path or "", fanart_path or "")
+    if lazy:
         return (poster_path or "", fanart_path or "")
     if poster_path and fanart_path:
         return (poster_path, fanart_path)
+    if poster_path and not fanart_path:
+        return (poster_path or "", fanart_path or "")
     try:
         best_p, best_f = _tmdb._get_best_images(tmdb_id, kind=kind)
         return (poster_path or best_p, fanart_path or best_f)
@@ -41,7 +52,8 @@ def _fill_images_if_missing(tmdb_id, poster_path, fanart_path, kind):
 def _movie_to_meta(r: Dict[str, Any]) -> Dict[str, Any]:
     tmdb_id = r.get("id")
     poster_path, fanart_path = _fill_images_if_missing(
-        tmdb_id, r.get("poster_path"), r.get("backdrop_path"), kind="movie")
+        tmdb_id, r.get("poster_path"), r.get("backdrop_path"),
+        kind="movie", lazy=True)
     raw_genre_ids = [int(g) for g in (r.get("genre_ids") or [])
                      if isinstance(g, (int, float))]
     return {
@@ -63,7 +75,8 @@ def _movie_to_meta(r: Dict[str, Any]) -> Dict[str, Any]:
 def _tv_to_meta(r: Dict[str, Any]) -> Dict[str, Any]:
     tmdb_id = r.get("id")
     poster_path, fanart_path = _fill_images_if_missing(
-        tmdb_id, r.get("poster_path"), r.get("backdrop_path"), kind="tv")
+        tmdb_id, r.get("poster_path"), r.get("backdrop_path"),
+        kind="tv", lazy=True)
     raw_genre_ids = [int(g) for g in (r.get("genre_ids") or [])
                      if isinstance(g, (int, float))]
     return {
@@ -197,6 +210,39 @@ def discover_movies(genre_id: int,
         data = _tmdb._http_get("/discover/movie", **params)
     except Exception as exc:  # noqa: BLE001
         log.warning("discover_movies selhalo: %s", exc)
+        return []
+    if not data:
+        return []
+    items = [_movie_to_meta(r) for r in (data.get("results") or [])]
+    cache.cache_set(key, items)
+    return items
+
+
+def discover_concerts(
+    page: int = 1,
+    sort_by: str = "popularity.desc",
+    origin_countries: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Koncertní filmy/záznamy z TMDB (žánr Hudba / Music)."""
+    if not _tmdb.is_enabled():
+        return []
+    oc_key = "|".join(origin_countries or [])
+    key = f"tmdb_discover_concerts:{TMDB_GENRE_MUSIC}:{sort_by}:{oc_key}:{page}"
+    cached = cache.cache_get(key, ttl=DEFAULT_TTL)
+    if cached is not None:
+        return list(cached or [])
+    params: Dict[str, Any] = {
+        "with_genres":     TMDB_GENRE_MUSIC,
+        "sort_by":         sort_by,
+        "page":            page,
+        "vote_count.gte":  3,
+    }
+    if origin_countries:
+        params["with_origin_country"] = "|".join(origin_countries)
+    try:
+        data = _tmdb._http_get("/discover/movie", **params)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("discover_concerts selhalo: %s", exc)
         return []
     if not data:
         return []

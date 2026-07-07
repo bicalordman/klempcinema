@@ -22,9 +22,14 @@ from typing import Callable, Optional
 
 from . import shutdown as _shutdown
 
+try:
+    from . import lifecycle as _lifecycle
+except Exception:  # noqa: BLE001
+    _lifecycle = None  # type: ignore
+
 log = logging.getLogger("klempcinema.prefetch")
 
-MAX_PREFETCH_PAGE = 20  # nebudeme zbytečně předfetchovat page 30+
+MAX_PREFETCH_PAGE = 12  # omezeni pozadi pri dlouhem prochazeni
 
 # Tracking aktivních prefetch tasků (cache_key -> True)
 _active: dict = {}
@@ -76,6 +81,9 @@ def _run(cache_key: str, fetcher: Callable[[], None]) -> None:
     try:
         if _shutdown.is_shutting_down():
             log.debug("prefetch %s skip - Kodi abort", cache_key)
+            return
+        if _lifecycle and _lifecycle.is_plugin_exiting():
+            log.debug("prefetch %s skip - plugin exit", cache_key)
             return
         fetcher()
         log.info("prefetch: hotovo (%s)", cache_key)

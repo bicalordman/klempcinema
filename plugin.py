@@ -32,6 +32,9 @@ import xbmcaddon  # type: ignore
 _ADDON = xbmcaddon.Addon()
 _ADDON_PATH = _ADDON.getAddonInfo("path")
 _LIB_PATH = os.path.join(_ADDON_PATH, "resources", "lib")
+# Kořen addonu musí být na sys.path kvůli ``from resources.lib import …``.
+if _ADDON_PATH not in sys.path:
+    sys.path.insert(0, _ADDON_PATH)
 if _LIB_PATH not in sys.path:
     sys.path.insert(0, _LIB_PATH)
 
@@ -76,8 +79,25 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         log.debug("cache cleanup selhal: %s", exc)
 
-    from resources.lib import router  # lazy import až po úpravě sys.path
-    router.route(params)
+    try:
+        from resources.lib import router
+        router.route(params)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("KlempCinema plugin selhal: %s", exc)
+        try:
+            import xbmcgui  # type: ignore
+            xbmcgui.Dialog().ok(
+                "KlempCinema",
+                f"Chyba pluginu:\n{exc}\n\nZkontroluj kodi.log (KlempCinema).",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        try:
+            from resources.lib import lifecycle as _lifecycle
+            _lifecycle.on_plugin_exit()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("plugin exit cleanup: %s", exc)
 
 
 if __name__ == "__main__":

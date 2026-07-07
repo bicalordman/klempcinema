@@ -15,6 +15,7 @@ Veřejné funkce:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
@@ -68,8 +69,11 @@ def _placeholder_poster_for(item: Dict[str, Any]) -> str:
     vlastni vygenerovany placeholder s typem (FILM/TV), nazvem, rokem
     a brandem KlempCinema.
     """
-    item_type = item.get("type") or "movie"
-    title = (item.get("title_localized")
+    # v0.0.134: art_kind ('concert') ma prednost - koncerty dostanou vlastni
+    # koncertni placeholder (jina barva + 'KONCERT'), i kdyz type=movie.
+    item_type = item.get("art_kind") or item.get("type") or "movie"
+    title = (item.get("placeholder_title")
+             or item.get("title_localized")
              or item.get("title")
              or item.get("base_title") or "")
     year = item.get("year")
@@ -140,16 +144,30 @@ def add_video_item(
     """
     # Lokalizovaný titul (z TMDB cs-CZ) má přednost před názvem ze souboru.
     raw_title = item.get("title_localized") or item.get("title") or ""
-    year = item.get("year")
+    raw_year = item.get("year")
+    year = raw_year
+    if year and not item.get("tmdb_id"):
+        try:
+            if int(year) >= datetime.now().year - 1:
+                year = None
+        except (TypeError, ValueError):
+            pass
     plot = item.get("plot") or ""
     # v0.0.57: Pokud TMDB nedoplnil poster, zkus ČSFD poster jako
     # primary art. Drive ČSFD plakat byl uplne ignorovan i kdyz TMDB
     # poster chybel - user videl jen placeholder. Ted se cely fallback
     # retez vyuziva: TMDB -> ČSFD -> WS thumb -> placeholder.
-    poster = item.get("poster") or item.get("csfd_poster") or ""
+    poster = (item.get("poster") or item.get("csfd_poster")
+              or item.get("ws_thumb") or "")
     fanart = item.get("fanart") or item.get("csfd_poster") or ""
     item_type = item.get("type") or "movie"
     dubbed = bool(item.get("dubbed", False))
+    if not dubbed:
+        try:
+            from . import api_webshare as _aws
+            dubbed = _aws.item_has_cz_dub(item)
+        except Exception:  # noqa: BLE001
+            pass
     subs_cz = bool(item.get("subs_cz", False))
     rating = float(item.get("rating") or 0)
     votes = int(item.get("votes") or 0)
@@ -297,6 +315,21 @@ def add_video_item(
             search_q = f"{search_q} {year}"
         ctx_items.append(("Hledat na ČSFD",
                           f"RunPlugin({build_url(_base_url(), action='open_csfd', query=search_q)})"))
+
+    # v0.0.118: Obnovit metadata - smaze cache titulu a znovu dotahne TMDB/CSFD
+    if raw_title:
+        refresh_kind = "tv" if kind == "tv" else "movie"
+        refresh_params: Dict[str, str] = {
+            "action": "refresh_metadata",
+            "title": raw_title,
+            "kind": refresh_kind,
+        }
+        if raw_year:
+            refresh_params["year"] = str(raw_year)
+        ctx_items.append((
+            "Obnovit metadata",
+            f"RunPlugin({build_url(_base_url(), **refresh_params)})",
+        ))
 
     # v0.0.62: Stahnout CZ titulky pres OpenSubtitles - manualni trigger
     # (jinak se titulky stahuji automaticky pri kliknuti na nedabovanou

@@ -58,12 +58,38 @@ from . import shutdown as _shutdown
 
 log = logging.getLogger("klempcinema.api_webshare")
 
+
+def _shutdown_pool(pool) -> None:
+    """v0.0.136: Ukonci ThreadPoolExecutor bez blokujiciho joinu.
+
+    Kdyz Kodi posle abort, cekat na doběhnutí workeru zaseklych v urlopen()
+    zdrzovalo vypinani Kodi (i minutu, hlavne pri enrichu na pozadi). Daemon
+    vlakna poolu umrou s interpreterem, takze join nepotrebujeme. Pouzivame
+    cancel_futures (Py 3.9+) k zahozeni jeste nespustenych uloh.
+    """
+    try:
+        pool.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        # Starsi Python bez cancel_futures - aspon neblokujici shutdown.
+        try:
+            pool.shutdown(wait=False)
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception:  # noqa: BLE001
+        pass
+
 # Max paralelních vláken pro TMDB/ČSFD enrich. Víc = rychlejší,
 # ale příliš mnoho současných requestů ohrozí rate-limit a riskne ban.
-ENRICH_WORKERS = 6  # v0.0.48: 8 -> 6 (bezpecnejsi TMDB rate limit 40 req/s)
+ENRICH_WORKERS = 4  # v0.0.126: 6->4 (mene paralelni sit pri dlouhem pouziti)
 # v0.0.81: max cekani na enrich pred zobrazenim seznamu. Po uplynuti
 # budgetu se zobrazi polozky s tim co stihlo dobehnout (zbytek = WS thumb).
-ENRICH_MAX_WAIT_SEC = 6
+# v0.0.130: 6->4 (po odstraneni CSFD staci TMDB se 4 vlakny).
+ENRICH_MAX_WAIT_SEC = 4
+
+# v0.0.130: globalni wall-clock strop na cele nacteni rubriky. Bez nej se
+# cas scital linearne (max_ws_pages * ENRICH_MAX_WAIT_SEC) -> 40s+.
+# Stejny princip jako TMDB_WS_FILTER_MAX_WAIT u platforem.
+RUBRIKA_FETCH_MAX_WAIT = 12.0
 
 
 # ---------------------------------------------------------------------------
@@ -742,25 +768,74 @@ def fetch_files(token: str, page: int = 1, _retry: bool = True) -> List[Dict[str
 # 3) KLASIFIKACE (FILMY / SERIÁLY / NOVINKY + dabing)
 # ---------------------------------------------------------------------------
 
-# Explicitní marker dabingu - "CZ dabing", "SK dab", "dabovaný", "dubbed".
-# Pokud je v názvu, jistě jde o dabing (ne titulky).
-_EXPLICIT_DUB_PATTERN = re.compile(
+# Explicitní CZ/SK dabing - MUSI obsahovat cz/sk/czech/slovak u slova dab/dub.
+# v0.0.107: NE pouhe "dubbed"/"dabing" (spanelsky/portugalsky upload = false CZ).
+_EXPLICIT_CZ_SK_DUB_PATTERN = re.compile(
     r"(?:^|[\W_])(?:"
-    r"cz[-_ ]?dab(?:ing|ovan[ýé])?|"
-    r"sk[-_ ]?dab(?:ing|ovan[ýé])?|"
+    r"cz[\W_]*dub(?:bed)?|"
+    r"sk[\W_]*dub(?:bed)?|"
+    r"cz[\W_]*dab(?:ing|ovan[ýé])?|"
+    r"sk[\W_]*dab(?:ing|ovan[ýé])?|"
     r"cz[-_ ]?sk[-_ ]?dab|sk[-_ ]?cz[-_ ]?dab|"
-    r"dab(?:ing|ovan[ýé]|ovano|ingom)?|"
     r"czech[-_ ]?dub|slovak[-_ ]?dub|"
-    r"dubbed|dubcz|dubsk"
+    r"dubcz|dubsk"
     r")(?:[\W_]|$)",
     re.IGNORECASE,
 )
 
-# Generic CZ/SK marker - může znamenat dabing nebo titulky.
-_GENERIC_CZ_SK_PATTERN = re.compile(
-    r"(?:^|[\W_])(?:cz|sk|czech|slovak|cz/sk|sk/cz|dual|multi)(?:[\W_]|$)",
+# Zpetna kompatibilita (nepouzivat pro detekci CZ - prilis volne).
+_EXPLICIT_DUB_PATTERN = _EXPLICIT_CZ_SK_DUB_PATTERN
+
+# v0.0.104: bezne na WS - "Michael.WEB-DL.CZ.5.1" = CZ audio stopa (ne titulky).
+# Drive v0.0.61 striktne .cz. bez slova dabing -> false -> film mimo Novinky dab.
+_CZ_AUDIO_TRACK_RE = re.compile(
+    r"[\W_](?:cz|sk)[\W_]+(?:"
+    r"5\.1|7\.1|2\.0|"
+    r"ddp\d?|dd5\.1|dd7\.1|aac|ac3|dts|atmos|truehd"
+    r")(?:[\W_]|$)",
     re.IGNORECASE,
 )
+
+# Generic CZ/SK marker - může znamenat dabing nebo titulky (NE dual/multi).
+_GENERIC_CZ_SK_PATTERN = re.compile(
+    r"(?:^|[\W_])(?:cz|sk|czech|slovak|cz/sk|sk/cz)(?:[\W_]|$)",
+    re.IGNORECASE,
+)
+
+# Cizi dabing v nazvu (ES/PT/FR/DE...) - bez CZ signalu neni cesky dab.
+_FOREIGN_DUB_LANG_RE = re.compile(
+    r"(?:^|[\W_])(?:"
+    r"es|esp|spa|spanish|castellano|latino|"
+    r"pt|portuguese|portugues|brasil|brazil|"
+    r"fr|french|francais|"
+    r"de|german|deutsch|ger|"
+    r"it|italian|italiano|"
+    r"ru|russian|ruski|"
+    r"hu|hungarian|magyar|"
+    r"jp|japanese|jap|"
+    r"kr|korean|kor|"
+    r"nl|dutch|nederlands|"
+    r"tr|turkish"
+    r")(?:[\W_]|$)",
+    re.IGNORECASE,
+)
+
+# Cizi audio stopa typu .ES.5.1 / .PT.7.1 (jako CZ.5.1 u Michaela).
+_FOREIGN_AUDIO_TRACK_RE = re.compile(
+    r"[\W_](?:es|pt|fr|de|it|ru|hu|jp|kr|spa|lat)[\W_]+(?:"
+    r"5\.1|7\.1|2\.0|"
+    r"ddp\d?|dd5\.1|dd7\.1|aac|ac3|dts|atmos|truehd"
+    r")(?:[\W_]|$)",
+    re.IGNORECASE,
+)
+
+# Pouhe "dubbed"/"dabing" bez CZ = typicky cizi nebo EN upload.
+_BARE_DUB_WORD_RE = re.compile(
+    r"(?:^|[\W_])(?:dubbed|dabing|dub)(?:[\W_]|$)",
+    re.IGNORECASE,
+)
+
+_DUAL_AUDIO_HINT = re.compile(r"\bdual\b", re.IGNORECASE)
 
 # Zachováno pro zpětnou kompatibilitu (používá se v UI badges).
 _DUB_PATTERN = re.compile(
@@ -812,6 +887,46 @@ _MOVIE_HINTS = re.compile(
 )
 
 
+def _has_strong_cz_dub_marker(name: str) -> bool:
+    """Spolehlivy CZ/SK dabing v nazvu (ne ciste EN/ES/PT 'dubbed')."""
+    if not name:
+        return False
+    if _EXPLICIT_CZ_SK_DUB_PATTERN.search(name):
+        return True
+    if _CZ_AUDIO_TRACK_RE.search(name):
+        return True
+    if _GENERIC_CZ_SK_PATTERN.search(name):
+        if _SUB_PATTERN.search(name):
+            return False
+        has_diacritic = bool(_CZ_DIACRITICS_RE.search(name))
+        has_cz_word = bool(_CZ_WORDS_RE.search(name))
+        cz_marker_count = len(_GENERIC_CZ_SK_PATTERN.findall(name))
+        if has_diacritic or has_cz_word or cz_marker_count >= 2:
+            return True
+    return False
+
+
+def _is_foreign_dub_only(name: str) -> bool:
+    """
+    True pokud nazev spis ukazuje na cizi dabing (ES/PT/FR...) nebo
+    obecne 'dubbed' bez CZ - typicky false positive v Novinkach dab.
+    """
+    if not name:
+        return False
+    if _has_strong_cz_dub_marker(name):
+        return False
+    if _FOREIGN_DUB_LANG_RE.search(name):
+        return True
+    if _FOREIGN_AUDIO_TRACK_RE.search(name):
+        return True
+    if _BARE_DUB_WORD_RE.search(name):
+        return True
+    if _DUAL_AUDIO_HINT.search(name):
+        # Dual bez CZ markeru = casto EN+ES, ne CZ dabing.
+        return True
+    return False
+
+
 def _detect_dubbed(name: str) -> bool:
     """
     True pokud název obsahuje marker CZ/SK DABINGU (ne pouze titulků).
@@ -825,32 +940,15 @@ def _detect_dubbed(name: str) -> bool:
          User feedback: "in Adams interest.cz.mkv" mel bare ".cz." tag
          ale nebyl realne cesky. Tyhle pripady ted dropnou badge.
       5) Generic CZ/SK marker + Czech signal -> True.
+      6) v0.0.107: Cizi dabing (ES/PT/FR...) nebo bare 'dubbed' bez CZ -> False.
     """
     if not name:
         return False
     if _is_polish_only(name):
         return False
-    if _EXPLICIT_DUB_PATTERN.search(name):
-        return True
-    if _GENERIC_CZ_SK_PATTERN.search(name):
-        # Samotné CZ/SK - dabing JEN POKUD není zároveň sub marker.
-        if _SUB_PATTERN.search(name):
-            return False
-        # v0.0.61: STRIKT - bare "cz"/"sk" tag bez dalsich CZ signalu
-        # je nespolehlivy (user reported "in Adams interest.cz.mkv" false
-        # positive). Vyzadujeme jeden z:
-        #   - ceska diakritika v nazvu (file ma ceska slova)
-        #   - ceske slovo ze _CZ_WORDS_RE (princezna, certi, pohadka...)
-        #   - vice CZ/SK markeru ("cz" + "czech", "cz" + "sk", apod.)
-        has_diacritic = bool(_CZ_DIACRITICS_RE.search(name))
-        has_cz_word = bool(_CZ_WORDS_RE.search(name))
-        # Count CZ/SK markers (more than 1 = high confidence)
-        cz_marker_count = len(_GENERIC_CZ_SK_PATTERN.findall(name))
-        if has_diacritic or has_cz_word or cz_marker_count >= 2:
-            return True
-        # Bare jediny "cz"/"sk" tag bez dalsich indikatoru - downgrade.
+    if _is_foreign_dub_only(name):
         return False
-    return False
+    return _has_strong_cz_dub_marker(name)
 
 
 def _detect_subtitles(name: str) -> bool:
@@ -1077,6 +1175,9 @@ _AUDIO_TIERS = [
     ("DTS",       r"\bdts\b", 35),
     ("DD+",       r"\b(?:e[-_.]?ac[-_.]?3|eac3|dd\+|ddp|dolby[-_.: ]?digital[-_.: ]?plus)\b", 30),
     ("DD 5.1",    r"\b(?:ac[-_.]?3|dd5\.?1|dolby[-_.: ]?digital(?!\s*plus))\b", 22),
+    # 6CH / 5CH - bez \b za ch (Python pocita _ jako \w -> 6CH_x264 jinak neprojde)
+    ("5.1",       r"[\W_.-](?:5\.1|5ch|6ch|surround)(?:[\W_.-]|$)", 13),
+    ("7.1",       r"[\W_.-](?:7\.1|7ch|8ch)(?:[\W_.-]|$)", 15),
     # Channel layout (může jit samostatně i ke kodeku)
     ("7.1",       r"\b(?:7\.1|7ch)\b", 15),
     ("5.1",       r"\b(?:5\.1|5ch|surround)\b", 12),
@@ -1285,7 +1386,69 @@ def detect_audio(name: str) -> str:
             if val > best_val:
                 best_val = val
                 best_label = label
-    return best_label
+    if best_label:
+        return best_label
+    return _detect_channel_layout(name)
+
+
+def _detect_channel_layout(name: str) -> str:
+    """
+    Nch / 5.1 / 7.1 z nazvu - bez \\b za 'ch' (6CH_x264 jinak neprojde).
+    """
+    if not name:
+        return ""
+    m = re.search(r"(?:^|[\W_.-])(\d+)ch(?:[\W_.-]|$)", name, re.I)
+    if m:
+        ch = int(m.group(1))
+        if ch >= 8:
+            return "7.1"
+        if ch >= 6:
+            return "5.1"
+        if ch >= 2:
+            return "2.0"
+    if re.search(r"[\W_.-]7\.1(?:[\W_.-]|$)", name, re.I):
+        return "7.1"
+    if re.search(r"[\W_.-]5\.1(?:[\W_.-]|$)", name, re.I):
+        return "5.1"
+    if re.search(r"[\W_.-]2\.0(?:[\W_.-]|$)", name, re.I):
+        return "2.0"
+    return ""
+
+
+def detect_audio_for_picker(name: str) -> str:
+    """
+    Audio pro quality picker - sirsi nez detect_audio (6CH, CZ.5.1, stereo).
+    """
+    audio = detect_audio(name)
+    if audio:
+        return audio
+    if not name:
+        return ""
+    if _CZ_AUDIO_TRACK_RE.search(name):
+        return "5.1"
+    if re.search(
+        r"[\W_](?:en|cz|sk|spa|pt|fr|de)[\W_]+7\.1",
+        name,
+        re.I,
+    ):
+        return "7.1"
+    if re.search(
+        r"[\W_](?:en|cz|sk|spa|pt|fr|de)[\W_]+5\.1",
+        name,
+        re.I,
+    ):
+        return "5.1"
+    if re.search(
+        r"[\W_](?:en|cz|sk)[\W_]+2\.0",
+        name,
+        re.I,
+    ):
+        return "2.0"
+    if re.search(r"[\W_.-]ac3(?:[\W_.-]|$)", name, re.I):
+        return "DD 5.1"
+    if re.search(r"[\W_.-]ddp(?:[\W_.-]|$)", name, re.I):
+        return "DD+"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1349,7 +1512,7 @@ def detect_badges(name: str) -> List[str]:
             break
 
     # Audio: nejlepší dostupný (Atmos / DTS:X / TrueHD / 5.1 ...)
-    audio = detect_audio(name)
+    audio = detect_audio_for_picker(name)
     if audio:
         out.append(audio)
 
@@ -1441,6 +1604,156 @@ def _title_tokens_match(target: str, candidate: str) -> bool:
     return t == c
 
 
+def _series_title_match(requested: str, detected: str) -> bool:
+    """
+    Striktni shoda nazvu serialu - bez substring match (v0.0.78 u filmu).
+
+    Drive ``target in det_norm`` v _collect_episodes_files matchovalo treba
+    Zaklinace i pro jiny serial (popularni WS vysledky + kratke dotazy).
+    """
+    if not requested or not detected:
+        return False
+
+    def _variants(s: str) -> List[str]:
+        n = _norm_compare(s)
+        folded = _norm_compare(_ct.ascii_fold(s))
+        out: List[str] = []
+        for v in (n, folded):
+            if v and v not in out:
+                out.append(v)
+            no_the = re.sub(r"^the\s+", "", v).strip()
+            if no_the and no_the not in out:
+                out.append(no_the)
+        return out
+
+    req_vars = _variants(requested)
+    det_vars = _variants(detected)
+    for rv in req_vars:
+        for dv in det_vars:
+            if rv == dv:
+                return True
+    if _title_tokens_match(requested, detected):
+        return True
+    rf = _ct.ascii_fold(requested)
+    df = _ct.ascii_fold(detected)
+    if rf and df and _title_tokens_match(rf, df):
+        return True
+    return False
+
+
+_EPISODE_EXTRA_TOKENS = frozenset({
+    "sk", "cz", "slovensko", "slovakia", "cesko", "ceska", "czech", "slovak",
+    "markiza", "voyo", "tv", "skcz", "czsk", "hd",
+})
+
+
+def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
+    """Shoda pro epizody — Survivor SK tagy, ale ne spin-off (Bachelor in Paradise)."""
+    if _series_title_match(requested, detected):
+        return True
+    rt = _title_meaningful_tokens(requested)
+    dt = _title_meaningful_tokens(detected)
+    if not rt or not dt:
+        return False
+    # Voyo katalog (kratky nazev) + WS tag (Survivor -> Survivor Slovensko)
+    if rt.issubset(dt):
+        extra = dt - rt
+        if not extra:
+            return True
+        if len(extra) <= 2 and all(t in _EPISODE_EXTRA_TOKENS for t in extra):
+            return True
+    # Preklep / diakritika (Ruza vs Ruža) — jen vysoka podobnost
+    try:
+        from .title_match import title_similarity
+        if title_similarity(requested, detected) >= 0.88:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def _variant_lang_tag(name: str) -> str:
+    """Jazykovy tag pro picker - klasicky format jako drive."""
+    if _detect_dubbed(name):
+        if re.search(r"\bSK\b|slovensk\w*|\bdab\s+SK\b", name, re.IGNORECASE):
+            return "SK dab"
+        return "CZ dab"
+    if _detect_subtitles(name):
+        return "CZ tit"
+    return "EN"
+
+
+def _variant_short_hint(name: str) -> str:
+    """Kratky rozlisovac (CAM, HEVC, 10bit) - bez celeho WS nazvu."""
+    if not name:
+        return ""
+    hints: List[str] = []
+    for pattern, label in (
+        (r"\bhdcam\b", "HDCAM"),
+        (r"\bhdts\b", "HDTS"),
+        (r"\bcamrip\b|\bcam\b", "CAM"),
+        (r"\b10.?bit\b", "10bit"),
+        (r"\bhevc\b|\bx265\b", "HEVC"),
+        (r"\bh\.?264\b|\bx264\b", "H264"),
+        (r"\bdv\b", "DV"),
+        (r"\bhdr\b", "HDR"),
+    ):
+        if re.search(pattern, name, re.I) and label not in hints:
+            hints.append(label)
+        if len(hints) >= 2:
+            break
+    return "+".join(hints)
+
+
+def format_variant_label_compact(f: Dict[str, Any]) -> str:
+    """
+    Kratky popisek pro Kodi Dialog.select - puvodni [zavorky] styl,
+    BEZ celeho WS nazvu (ten rolovat nechceme).
+
+    Priklad: '[1080p WEBRip] [5.1] [CZ dab] 4.2 GB'
+    """
+    name = f.get("name") or ""
+    quality = _quality_label(name) or "SD"
+    audio = detect_audio_for_picker(name)
+    size = _format_size(f.get("size"))
+    lang = _variant_lang_tag(name)
+
+    parts: List[str] = [f"[{quality}]"]
+    if audio:
+        parts.append(f"[{audio}]")
+    parts.append(f"[{lang}]")
+    if size:
+        parts.append(size)
+
+    line = "  ".join(parts)
+    if len(line) > 62:
+        short_q = (quality.split() or ["SD"])[0]
+        parts = [f"[{short_q}]"]
+        if audio:
+            parts.append(f"[{audio}]")
+        parts.append(f"[{lang}]")
+        line = "  ".join(parts)
+    return line
+
+
+def build_variant_picker_labels(variants: List[Dict[str, Any]]) -> List[str]:
+    """
+    Popisky pro quality picker - citelne zavorky, kratke, bez rolovani.
+    """
+    labels: List[str] = []
+    seen: Dict[str, int] = {}
+    for v in variants:
+        core = format_variant_label_compact(v)
+        count = seen.get(core, 0)
+        seen[core] = count + 1
+        if count:
+            name = v.get("name") or ""
+            hint = _variant_short_hint(name)
+            core = f"{core}  [{hint or f'#{count + 1}'}]"
+        labels.append(core)
+    return labels
+
+
 def format_variant_label(f: Dict[str, Any]) -> str:
     """
     Popisek pro položku v select dialogu (Vyber kvalitu...).
@@ -1458,25 +1771,13 @@ def format_variant_label(f: Dict[str, Any]) -> str:
     """
     name = f.get("name") or ""
     quality = _quality_label(name) or "?"
-    audio = detect_audio(name)
+    audio = detect_audio_for_picker(name)
     size = _format_size(f.get("size"))
     raw = _strip_extension(name)
     if len(raw) > 60:
         raw = raw[:57] + "..."
 
-    # v0.0.51: jazyk audio stopy - kriticke pro rozliseni dab vs original
-    is_dubbed = _detect_dubbed(name)
-    has_subs = _detect_subtitles(name)
-    if is_dubbed:
-        # Rozlisit CZ vs SK dabing podle nazvu
-        if re.search(r"\bSK\b|slovensk\w*|\bdab\s+SK\b", name, re.IGNORECASE):
-            lang = "SK dab"
-        else:
-            lang = "CZ dab"
-    elif has_subs:
-        lang = "CZ tit"
-    else:
-        lang = "EN"
+    lang = _variant_lang_tag(name)
 
     parts = [f"[{quality}]"]
     if audio:
@@ -1693,16 +1994,363 @@ def _enrich_skip_enabled() -> bool:
 
 
 def _needs_csfd_fallback(it: Dict[str, Any], tmdb_works: bool) -> bool:
-    """v0.0.81: CSFD scrape je pomaly (1-3s/item). Na seznamech ho volame
-    jen kdyz TMDB neposkytl plakat nebo rating - ne pro kazdou polozku."""
+    """v0.0.81: CSFD scrape je pomaly (1-3s/item). Volame jen kdyz
+    TMDB neposkytl plakat - ne pro doplneni ratingu (v0.0.114 rychlost)."""
     if not tmdb_works:
         return True
-    poster = (it.get("poster") or "").strip()
-    rating = float(it.get("rating") or 0)
-    votes = int(it.get("votes") or 0)
-    if poster and (rating > 0 or votes > 0):
+    return not _item_has_display_poster(it)
+
+
+# v0.0.112: cross-rubric snapshot - po enrichu ulozime vysledek, aby dalsi
+# rubrika (Filmy -> Novinky) nemusela cekat na paralelni enrich znovu.
+_ENRICH_SNAP_TTL = 30 * 86400
+_ENRICH_SNAP_FIELDS = (
+    "tmdb_id", "title_localized", "original_title", "year", "plot",
+    "poster", "fanart", "rating", "votes", "popularity",
+    "genre_ids", "genre_names",
+    "csfd_id", "csfd_url", "csfd_rating", "csfd_rating_pct", "csfd_poster",
+)
+
+
+def _enrich_snap_key(it: Dict[str, Any], kind: str) -> str:
+    from . import clean_title as _ct
+    raw = (it.get("base_title") or it.get("title") or "").strip()
+    if not raw:
+        return ""
+    year = it.get("year") or ""
+    clean = _ct.clean_title(raw) or raw
+    return f"enrich:snap:v2:{kind}:{clean.lower()}:{year or ''}"
+
+
+def _enrich_snap_key_variants(it: Dict[str, Any], kind: str) -> List[str]:
+    """Snapshot klice - s rokem i bez (rubriky mohou mit jiny year v itemu)."""
+    keys: List[str] = []
+    primary = _enrich_snap_key(it, kind)
+    if primary:
+        keys.append(primary)
+    if it.get("year"):
+        alt = dict(it)
+        alt["year"] = ""
+        k2 = _enrich_snap_key(alt, kind)
+        if k2 and k2 not in keys:
+            keys.append(k2)
+    return keys
+
+
+def _apply_enrich_snap(it: Dict[str, Any], snap: Dict[str, Any]) -> None:
+    """Aplikuje snapshot; TMDB/CSFD plakat ma prednost pred WS thumb."""
+    for field in _ENRICH_SNAP_FIELDS:
+        val = snap.get(field)
+        if val is None or val == "" or val == []:
+            continue
+        if field in ("poster", "fanart", "csfd_poster"):
+            cur = (it.get(field) or "").strip()
+            new = str(val).strip()
+            if not new:
+                continue
+            if not cur or _is_quality_poster_url(new) or not _is_quality_poster_url(cur):
+                it[field] = new
+            continue
+        if not it.get(field):
+            it[field] = val
+    _promote_csfd_poster(it)
+
+
+def _is_quality_poster_url(url: str) -> bool:
+    """TMDB / CSFD plakat - ne Webshare thumb."""
+    if not url:
         return False
-    return True
+    u = url.lower()
+    if "image.tmdb.org" in u:
+        return True
+    if "csfd" in u and u.startswith(("http://", "https://")):
+        return True
+    return False
+
+
+def _promote_csfd_poster(it: Dict[str, Any]) -> None:
+    """Kdyz TMDB poster chybi, pouzij csfd_poster jako poster pro UI."""
+    if _is_quality_poster_url((it.get("poster") or "").strip()):
+        return
+    cp = (it.get("csfd_poster") or "").strip()
+    if _is_quality_poster_url(cp):
+        it["poster"] = cp
+
+
+def _item_has_display_poster(it: Dict[str, Any]) -> bool:
+    """Skutecny TMDB/CSFD plakat - WS thumb nepoctame (jinak se preskoci enrich)."""
+    for field in ("poster", "csfd_poster"):
+        if _is_quality_poster_url((it.get(field) or "").strip()):
+            return True
+    return False
+
+
+def _prefill_enrich_snap(it: Dict[str, Any], kind: str) -> bool:
+    for key in _enrich_snap_key_variants(it, kind):
+        snap = cache.cache_get(key, ttl=_ENRICH_SNAP_TTL)
+        if snap and isinstance(snap, dict):
+            _apply_enrich_snap(it, snap)
+    return _item_has_display_poster(it)
+
+
+def _save_enrich_snap(it: Dict[str, Any], kind: str) -> None:
+    if not _item_has_display_poster(it):
+        return
+    key = _enrich_snap_key(it, kind)
+    if not key:
+        return
+    snap = {field: it.get(field) for field in _ENRICH_SNAP_FIELDS if it.get(field)}
+    if snap:
+        try:
+            cache.cache_set(key, snap)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("save_enrich_snap(%r) selhalo: %s", key, exc)
+    try:
+        from . import metadata_cache as _mc
+        title = (
+            (it.get("title_localized") or it.get("title") or it.get("base_title") or "")
+            .strip()
+        )
+        if title:
+            _mc.save(title, {
+                "year": it.get("year") or "",
+                "rating": it.get("rating") or it.get("csfd_rating") or "",
+                "plot": it.get("plot") or "",
+                "poster": it.get("poster"),
+                "fanart": it.get("fanart"),
+                "source": "tmdb" if it.get("tmdb_id") else (
+                    "csfd" if it.get("csfd_id") else "none"
+                ),
+                "tmdb_id": it.get("tmdb_id"),
+            })
+    except Exception as exc:  # noqa: BLE001
+        log.debug("metadata_cache.save z enrich_snap selhalo: %s", exc)
+
+
+def invalidate_title_metadata(
+    title: str,
+    year: Optional[int] = None,
+    kind: str = "movie",
+) -> int:
+    """Smaže cache metadat pro jeden titul (snapshot, TMDB, CSFD, metadata JSON)."""
+    from . import clean_title as _ct
+    from .title_match import apply_typo_fixes, title_search_variants
+
+    raw = (title or "").strip()
+    if not raw:
+        return 0
+    clean = (_ct.clean_title(raw) or raw).strip()
+    n = 0
+    titles_to_clear = set(title_search_variants(raw, year))
+    titles_to_clear.add(raw)
+    titles_to_clear.add(clean)
+    titles_to_clear.add(apply_typo_fixes(clean))
+    fake: Dict[str, Any] = {"title": raw, "base_title": raw, "year": year}
+    for key in _enrich_snap_key_variants(fake, kind):
+        if cache.cache_delete(key):
+            n += 1
+
+    low = clean.lower()
+    year_vals: List[Any] = [""]
+    if year is not None:
+        year_vals.append(year)
+    if kind == "series":
+        if cache.cache_delete(f"tmdb:tv:v3:{low}"):
+            n += 1
+        if cache.cache_delete(f"csfd:v6:tv:{low}:"):
+            n += 1
+    else:
+        for t in titles_to_clear:
+            low = (_ct.clean_title(t) or t).strip().lower()
+            if not low:
+                continue
+            for yv in year_vals:
+                for ver in ("v8", "v9"):
+                    tk = f"tmdb:movie:{ver}:{low}:{yv or ''}"
+                    if cache.cache_delete(tk):
+                        n += 1
+                ck = f"csfd:v6:film:{low}:{yv or ''}"
+                if cache.cache_delete(ck):
+                    n += 1
+
+    try:
+        from . import metadata_cache as _mc
+        for t in {raw, clean}:
+            if _mc.delete(t):
+                n += 1
+    except Exception as exc:  # noqa: BLE001
+        log.debug("invalidate_title_metadata metadata_cache: %s", exc)
+    log.info("invalidate_title_metadata(%r, year=%s, kind=%s): %d klicu",
+             clean, year, kind, n)
+    return n
+
+
+def refresh_title_metadata(
+    title: str,
+    year: Optional[int] = None,
+    kind: str = "movie",
+) -> Dict[str, Any]:
+    """Znovu stáhne TMDB/CSFD metadata pro jeden titul (po smazání cache)."""
+    from . import csfd
+    from . import tmdb
+
+    raw = (title or "").strip()
+    invalidate_title_metadata(raw, year, kind)
+    item: Dict[str, Any] = {
+        "title": raw,
+        "base_title": raw,
+        "year": year,
+    }
+    for field in _ENRICH_SNAP_FIELDS:
+        item.pop(field, None)
+
+    tmdb_enabled = tmdb.is_enabled()
+    csfd_on = csfd.is_enabled()
+    tmdb_works = False
+    if tmdb_enabled:
+        test = tmdb.self_test()
+        tmdb_works = bool(test.get("ok"))
+
+    if tmdb_works:
+        if kind == "series":
+            tmdb.enrich_series_item(item)
+        else:
+            tmdb.enrich_movie_item(item)
+    if csfd_on and _needs_csfd_fallback(item, tmdb_works):
+        if kind == "series":
+            csfd.enrich_series_item(item)
+        else:
+            csfd.enrich_movie_item(item)
+        _retry_tmdb_after_csfd(item, kind)
+    _auto_heal_item_metadata(item, kind)
+    _promote_csfd_poster(item)
+    _save_enrich_snap(item, kind)
+    return item
+
+
+def _prefill_enrich_from_cache(items: List[Dict[str, Any]], kind: str,
+                               tmdb_enabled: bool, csfd_enabled: bool) -> int:
+    """Synchronne doplni metadata z cache (snapshot + TMDB/CSFD raw cache)."""
+    from . import tmdb
+    from . import csfd
+
+    prefilled = 0
+    for it in items:
+        had_poster = _item_has_display_poster(it)
+        _prefill_enrich_snap(it, kind)
+        if tmdb_enabled and not _item_has_display_poster(it):
+            if kind == "series":
+                tmdb.prefill_series_item_from_cache(it)
+            else:
+                tmdb.prefill_movie_item_from_cache(it)
+        if csfd_enabled and not _item_has_display_poster(it):
+            if kind == "series":
+                csfd.prefill_series_item_from_cache(it)
+            else:
+                csfd.prefill_movie_item_from_cache(it)
+        _promote_csfd_poster(it)
+        if _item_has_display_poster(it) and not had_poster:
+            prefilled += 1
+    return prefilled
+
+
+def _warm_item_posters(items: List[Dict[str, Any]]) -> None:
+    """Lokalni image cache - stejny plakat URL = bez site pri dalsi rubrice."""
+    if not items:
+        return
+    try:
+        from . import image_cache
+        image_cache.warm_items_posters(items)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("warm_item_posters selhalo: %s", exc)
+
+
+def _retry_tmdb_after_csfd(it: Dict[str, Any], kind: str) -> None:
+    """CSFD casto opravi preklep v nazvu -> druhy pokus TMDB s celym titulem."""
+    if kind != "movie":
+        return
+    from . import tmdb
+    if not tmdb.is_enabled():
+        return
+    if it.get("tmdb_id") and _item_has_display_poster(it):
+        return
+    csfd_title = (it.get("title_localized") or "").strip()
+    orig = (it.get("title") or it.get("base_title") or "").strip()
+    if not csfd_title or csfd_title.lower() == orig.lower():
+        return
+    try:
+        meta = tmdb.search_movie(csfd_title, it.get("year"))
+        if meta:
+            tmdb._merge_meta(it, meta, kind="movie")
+            _promote_csfd_poster(it)
+            log.info("retry_tmdb_after_csfd: %r -> %r (tmdb_id=%s)",
+                     orig, csfd_title, it.get("tmdb_id"))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("retry_tmdb_after_csfd(%r) selhalo: %s", orig, exc)
+
+
+def _auto_heal_item_metadata(it: Dict[str, Any], kind: str) -> None:
+    """v0.0.122: Automaticky zkusit varianty titulu (preklepy, sequel) bez menu."""
+    if kind != "movie" or _item_has_display_poster(it):
+        return
+    from . import csfd
+    from . import tmdb
+    from .title_match import title_search_compatible, title_search_variants
+
+    title = (it.get("base_title") or it.get("title") or "").strip()
+    if not title:
+        return
+    year = it.get("year")
+    variants = title_search_variants(title, year)
+    if not variants:
+        return
+
+    if tmdb.is_enabled():
+        for q in variants:
+            if q.lower() == title.lower() and it.get("tmdb_id"):
+                continue
+            try:
+                meta = tmdb.search_movie(q, year)
+                if meta:
+                    if not title_search_compatible(
+                        title, q,
+                        meta.get("title") or "",
+                        meta.get("original") or "",
+                    ):
+                        continue
+                    tmdb._merge_meta(it, meta, kind="movie")
+                    _promote_csfd_poster(it)
+                    if _item_has_display_poster(it):
+                        log.info("auto_heal: TMDB %r pres %r (id=%s)",
+                                 title, q, it.get("tmdb_id"))
+                        return
+            except Exception as exc:  # noqa: BLE001
+                log.debug("auto_heal TMDB(%r) selhalo: %s", q, exc)
+
+    if not csfd.is_enabled() or _item_has_display_poster(it):
+        return
+    for q in variants:
+        try:
+            meta = csfd.search_movie(q, year)
+            if meta:
+                csfd._merge_meta(it, meta)
+                _retry_tmdb_after_csfd(it, kind)
+                _promote_csfd_poster(it)
+                if _item_has_display_poster(it):
+                    log.info("auto_heal: CSFD %r pres %r", title, q)
+                    return
+        except Exception as exc:  # noqa: BLE001
+            log.debug("auto_heal CSFD(%r) selhalo: %s", q, exc)
+
+
+def _enrich_item_complete(it: Dict[str, Any], kind: str,
+                          tmdb_works: bool, csfd_on: bool) -> bool:
+    # v0.0.115: hotovo = ma skutecny plakat (ne jen tmdb_id bez obrazku)
+    if _item_has_display_poster(it):
+        return True
+    if not tmdb_works and not csfd_on:
+        return True
+    return False
 
 
 def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
@@ -1736,14 +2384,45 @@ def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
     from . import tmdb
     from . import csfd
 
-    # Otestuj TMDB jediným requestem. Výsledek se cachuje 5 min.
-    tmdb_test = tmdb.self_test() if tmdb.is_enabled() else {"ok": False, "reason": "disabled"}
-    tmdb_works = bool(tmdb_test.get("ok"))
     csfd_on = csfd.is_enabled() and not skip_csfd
+    tmdb_enabled = tmdb.is_enabled()
+
+    # v0.0.114: nejdriv cache (bez site), pak az network enrich pro zbytek
+    n_prefill = _prefill_enrich_from_cache(
+        items, kind, tmdb_enabled, csfd_on)
+    for it in items:
+        if _item_has_display_poster(it):
+            _save_enrich_snap(it, kind)
+    pending_items = [
+        it for it in items
+        if not _enrich_item_complete(it, kind, tmdb_enabled, csfd_on)
+    ]
+    if n_prefill:
+        log.info("enrich: %d/%d polozek z cache (zbyva %d)",
+                 n_prefill, len(items), len(pending_items))
+
+    if not pending_items:
+        _warm_item_posters(items)
+        return
+
+    # TMDB self_test az kdyz opravdu potrebujeme sit (cache nestacila)
+    tmdb_test = (tmdb.self_test() if tmdb_enabled
+                 else {"ok": False, "reason": "disabled"})
+    tmdb_works = bool(tmdb_test.get("ok"))
 
     if not tmdb_works and not csfd_on:
         log.info("enrich: oba providery vypnuté/rozbité (tmdb=%s csfd=%s)",
                  tmdb_test.get("reason"), csfd_on)
+        _warm_item_posters(items)
+        return
+
+    # Re-check pending po self_test (tmdb_works se muze lisit od tmdb_enabled)
+    pending_items = [
+        it for it in items
+        if not _enrich_item_complete(it, kind, tmdb_works, csfd_on)
+    ]
+    if not pending_items:
+        _warm_item_posters(items)
         return
 
     def _enrich_one(it: Dict[str, Any]) -> None:
@@ -1764,22 +2443,29 @@ def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
                     csfd.enrich_series_item(it)
                 else:
                     csfd.enrich_movie_item(it)
+                _retry_tmdb_after_csfd(it, kind)
+            _auto_heal_item_metadata(it, kind)
+            _save_enrich_snap(it, kind)
         except Exception as exc:  # noqa: BLE001
             log.debug("enrich item %r selhal: %s", it.get("title"), exc)
+        finally:
+            _promote_csfd_poster(it)
 
     # Adaptivní počet workerů.
     if tmdb_works:
-        workers = min(ENRICH_WORKERS, max(1, len(items)))  # TMDB unese 8-16
+        workers = min(ENRICH_WORKERS, max(1, len(pending_items)))  # TMDB unese 8-16
     else:
-        workers = min(2, max(1, len(items)))               # ČSFD anti-bot: max 2
+        workers = min(2, max(1, len(pending_items)))               # CSFD anti-bot: max 2
 
-    log.debug("enrich: %d items, %d workers (tmdb_ok=%s, csfd=%s, kind=%s) reason=%s",
-              len(items), workers, tmdb_works, csfd_on, kind, tmdb_test.get("reason"))
+    log.debug("enrich: %d items (%d pending), %d workers (tmdb_ok=%s, csfd=%s, kind=%s) reason=%s",
+              len(items), len(pending_items), workers, tmdb_works, csfd_on, kind,
+              tmdb_test.get("reason"))
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_enrich_one, it) for it in items]
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
+        futures = [pool.submit(_enrich_one, it) for it in pending_items]
         pending = set(futures)
-        budget = float(ENRICH_MAX_WAIT_SEC)
+        budget = 1.5 if len(pending_items) <= 5 else float(ENRICH_MAX_WAIT_SEC)
         while pending and budget > 0 and not _shutdown.is_shutting_down():
             _done, pending = wait(pending, timeout=min(0.5, budget))
             budget -= 0.5
@@ -1789,6 +2475,76 @@ def _enrich_in_parallel(items: List[Dict[str, Any]], kind: str,
                      reason, len(pending), len(futures))
             for fut in pending:
                 fut.cancel()
+    finally:
+        # v0.0.136: pri Kodi abortu NEBLOKOVAT join workeru zaseklych v
+        # urlopen (drive 'with' cekal wait=True -> pomale vypinani Kodi,
+        # hlavne pri enrichu na pozadi/prefetch). Daemon vlakna umrou s
+        # interpreterem. Jinak (normal) uklidime bez cekani take - budget
+        # uz probehl, zbytek je cancelled.
+        _shutdown_pool(pool)
+
+    _warm_item_posters(items)
+
+
+# Kolik poster-less polozek smi dostat (pomalejsi) CSFD zachranu na 1 WS
+# stranku a jak dlouho na ne cekat. Male cislo = ceske tituly co TMDB nezna
+# (Imperium, Ignorace) dostanou plakat, ale cas zustava omezeny.
+CSFD_RESCUE_MAX_ITEMS = 5
+CSFD_RESCUE_BUDGET_SEC = 3.0
+
+
+def _csfd_rescue_posters(items: List[Dict[str, Any]], kind: str,
+                         max_items: int = CSFD_RESCUE_MAX_ITEMS,
+                         budget_sec: float = CSFD_RESCUE_BUDGET_SEC) -> None:
+    """
+    v0.0.130: Cilena CSFD zachrana plakatu PO rychlem TMDB enrichu.
+
+    Bezi jen na hrstce polozek, ktere po TMDB nemaji ZADNY plakat
+    (typicky ceske tituly bez TMDB shody). TMDB (rychle) resi vetsinu,
+    tohle jen doplni zbytek - levne a s tvrdym budgetem. Vysledek se
+    uklada do snap cache, takze pri dalsim otevreni jsou plakaty hned.
+    """
+    if not items or _shutdown.is_shutting_down():
+        return
+    try:
+        from . import csfd
+    except Exception:  # noqa: BLE001
+        return
+    if not csfd.is_enabled():
+        return
+
+    pending = [it for it in items if not _item_has_display_poster(it)][:max_items]
+    if not pending:
+        return
+
+    def _one(it: Dict[str, Any]) -> None:
+        if _shutdown.is_shutting_down():
+            return
+        try:
+            if kind == "series":
+                csfd.enrich_series_item(it)
+            else:
+                csfd.enrich_movie_item(it)
+            _retry_tmdb_after_csfd(it, kind)
+            _save_enrich_snap(it, kind)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("csfd rescue %r selhal: %s", it.get("title"), exc)
+        finally:
+            _promote_csfd_poster(it)
+
+    log.debug("csfd_rescue: %d poster-less polozek (kind=%s)", len(pending), kind)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        futs = set(pool.submit(_one, it) for it in pending)
+        budget = float(budget_sec)
+        while futs and budget > 0 and not _shutdown.is_shutting_down():
+            _done, futs = wait(futs, timeout=min(0.5, budget))
+            budget -= 0.5
+        for f in futs:
+            f.cancel()
+    finally:
+        _shutdown_pool(pool)  # v0.0.136: neblokovat vypinani Kodi
+    _warm_item_posters(pending)
 
 
 def _files_to_variant_refs(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1925,6 +2681,9 @@ def _movies_from_groups(
     pre_filter=None,
     skip_aggressive_filters: bool = False,
     skip_csfd: bool = False,
+    skip_enrich: bool = False,
+    skip_poster: bool = False,
+    csfd_rescue: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Z dict[title -> files] vytvoří video-items pro UI (paralelní enrich).
@@ -2019,7 +2778,8 @@ def _movies_from_groups(
             "title": title,
             "year": _guess_year(best.get("name") or ""),
             "plot": f"Dostupné varianty: {len(variants)}",
-            "poster": ws_thumb or None,
+            "poster": None,
+            "ws_thumb": ws_thumb or None,
             "fanart": None,
             "type": "movie",
             "dubbed": is_dubbed,
@@ -2027,6 +2787,7 @@ def _movies_from_groups(
             "base_title": title,
             "variant_idents": [v["ident"] for v in variants],
             "variants_count": len(variants),
+            "ws_names": " ".join(v.get("name") or "" for v in variants),
             "quality_score": max_quality,
             "best_audio": best_audio,
             "badges": badges,
@@ -2049,9 +2810,18 @@ def _movies_from_groups(
         items = pre_filter(items)
         log.debug("_movies_from_groups: pre_filter %d -> %d items", before, len(items))
 
+    if skip_enrich:
+        items = _filter_with_webshare_files(items)
+        return items
+
     _enrich_in_parallel(items, kind="movie", skip_csfd=skip_csfd)
+    # v0.0.130: kdyz TMDB (rychle) nechalo par polozek bez plakatu, dopln
+    # je cilenou CSFD zachranou (ceske tituly co TMDB nezna).
+    if csfd_rescue and skip_csfd:
+        _csfd_rescue_posters(items, kind="movie")
     items = _dedupe_after_enrich(items, mode="movie")
-    items = _filter_with_poster(items)
+    if not skip_poster:
+        items = _filter_with_poster(items)
     items = _filter_with_webshare_files(items)
     return items
 
@@ -2074,6 +2844,7 @@ def _series_from_groups(groups: Dict[str, List[Dict[str, Any]]]) -> List[Dict[st
         variants = _files_to_variant_refs(fs)
         if not variants:
             continue
+        _save_variants_cache(sname, "series", variants)
         is_dubbed = any(_detect_dubbed(v.get("name") or "") for v in variants)
         has_subs = any(_detect_subtitles(v.get("name") or "") for v in variants)
         # Pro seriály vezmeme nejlepší kvalitu napříč epizodami pro badges
@@ -2104,12 +2875,14 @@ def _series_from_groups(groups: Dict[str, List[Dict[str, Any]]]) -> List[Dict[st
             "title": sname,
             "year": None,
             "plot": f"Epizody nalezené v této stránce: {len(variants)}",
-            "poster": ws_thumb or None,
+            "poster": None,
+            "ws_thumb": ws_thumb or None,
             "fanart": None,
             "type": "series",
             "dubbed": is_dubbed,
             "subs_cz": has_subs,
             "series_name": sname,
+            "variant_idents": [v["ident"] for v in variants],
             "variants_count": len(variants),
             "quality_score": max((_quality_score(v.get("name") or "") for v in variants), default=0),
             "best_audio": best_audio,
@@ -2265,7 +3038,7 @@ def _dedupe_after_enrich(items: List[Dict[str, Any]],
                             for i in all_variants if i]
                 if refs:
                     _save_variants_cache(base, mode, refs)
-        canonical["dubbed"] = any(it.get("dubbed") for it in group)
+        canonical["dubbed"] = any(item_has_cz_dub(it) for it in group)
 
         # Cache pro play_pick: musí obsahovat full variant refs.
         # Načteme všechny dílčí cache a sjednotíme.
@@ -2387,6 +3160,8 @@ def _category_grouped(
     sort: str,
     page: int,
     mode: str,
+    skip_csfd: bool = False,
+    csfd_rescue: bool = False,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Stáhne JEDNU Webshare stránku kategorie.
@@ -2395,6 +3170,13 @@ def _category_grouped(
       None  = Webshare už nemá víc souborů
       []    = WS dal soubory, ale po filtrech nic
       [its] = video-items pro UI
+
+    :param skip_csfd: v0.0.128 - vynech ČSFD fallback enrich (rychlejsi
+                      first-load). ČSFD scraping je kvuli Cloudflare
+                      dominantni bottleneck (1-3s/film). TMDB staci pro
+                      plakaty u vetsiny filmu; stejne jako 4K/BluRay rubriky.
+    :param csfd_rescue: v0.0.130 - po TMDB dopln plakaty poster-less
+                      polozkam cilenou (omezenou) CSFD zachranou.
     """
     query = _addon_query(setting_id, default_query)
     files = search_videos(query=query, sort=sort, page=page)
@@ -2404,7 +3186,8 @@ def _category_grouped(
     if mode == "series":
         return _series_from_groups(_group_by_series(files))
     files = _exclude_series(files)
-    return _movies_from_groups(_group_by_title(files))
+    return _movies_from_groups(_group_by_title(files), skip_csfd=skip_csfd,
+                               csfd_rescue=csfd_rescue)
 
 
 def _has_poster(it: Dict[str, Any]) -> bool:
@@ -2513,8 +3296,8 @@ def _min_quality_filter(items: List[Dict[str, Any]],
 
 
 def _dubbed_only_filter(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Jen položky s CZ/SK dabingem (dubbed == True)."""
-    out = [it for it in items if it.get("dubbed")]
+    """Jen položky s CZ/SK dabingem (dubbed == True nebo CZ stopa v ws_names)."""
+    out = [it for it in items if item_has_cz_dub(it)]
     log.debug("_dubbed_only_filter: %d -> %d items (jen CZ/SK dabing)",
              len(items), len(out))
     return out
@@ -2542,6 +3325,7 @@ def _paginate_rubrika(
     sort_key_override=None,
     max_ws_pages: int = 4,
     ttl_override: Optional[int] = None,
+    max_wait_sec: Optional[float] = RUBRIKA_FETCH_MAX_WAIT,
 ) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Společný wrapper: 50 položek na ui_page, plakát-první sort napříč
@@ -2588,6 +3372,7 @@ def _paginate_rubrika(
         max_ws_pages=max_ws_pages,
         sort_key=sort_key,
         ttl_override=ttl_override,
+        max_wait_sec=max_wait_sec,
     )
 
 
@@ -2624,21 +3409,76 @@ def _read_year_range() -> tuple:
     return (min_y, max_y)
 
 
-def get_movies(sort: str = "recent", page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
-    """Filmy – vrací (items, has_more)."""
-    log.debug("get_movies(sort=%s, ui_page=%s)", sort, page)
+def _search_sort_key(it: Dict[str, Any], want_year: Optional[int] = None):
+    """
+    v0.0.102: Razeni vysledku hledani - kvalita, rok, CZ dab, cerstvost.
+
+    SD / stare verze stejneho nazvu padnou dolu (Michael 2026 nahoru).
+    """
+    quality = int(it.get("quality_score") or 0)
+    year = _effective_release_year(it)
+    cy = _current_year()
+    year_rank = 0
+    if want_year and year == int(want_year):
+        year_rank = 3
+    elif year in (cy, cy - 1):
+        year_rank = 2
+    elif year > 0:
+        year_rank = 1
+    dubbed = 1 if it.get("dubbed") else 0
+    added = _added_to_ts(it.get("ws_added") or "")
+    return (-quality, -year_rank, -year, -dubbed, -added)
+
+
+def get_movies(
+    sort: str = "recent",
+    page: int = 1,
+    query_override: Optional[str] = None,
+    search_year: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Filmy – vrací (items, has_more).
+
+    v0.0.99: query_override = volne hledani v rubrice (jako 4K) – bez
+    year filtru a bez agresivnich filtru.
+    """
+    log.debug("get_movies(sort=%s, ui_page=%s, override=%r)",
+              sort, page, query_override)
+    if query_override:
+        q = query_override.strip()
+        queries = _build_rubric_search_queries(
+            q, search_year, extras=[f"{q} CZ", f"{q} 1080p"])
+        cache_key = f"rubrika:movies:search:v5:{q.lower()}:y{search_year or 0}"
+        return _paginate_multi_query(
+            cache_key=cache_key,
+            queries=queries,
+            ui_page=page,
+            pre_filter=None,
+            post_filter=None,
+            sort_key=lambda it: _search_sort_key(it, want_year=search_year),
+            max_ws_pages=12,
+            skip_enrich=True,
+            skip_poster=True,
+            skip_aggressive_filters=True,
+            trust_ws_query=True,
+        )
+
     query = _addon_query("q_movies", DEFAULT_QUERIES["movies"])
     min_y, max_y = _read_year_range()
     sort_mode = _read_sort("sort_movies", SORT_MOVIES)
 
     def _ws_fetch(ws_page: int):
+        # v0.0.128: skip_csfd=True - ČSFD fallback je hlavni brzda pri
+        # nacitani Filmu (1-3s/film pres Cloudflare). TMDB da plakaty rychle,
+        # stejne jako u 4K/BluRay/Animovanych rubrik. ČSFD rating se dopini
+        # z cross-rubric snapshotu / pri prehravani.
         return _category_grouped("q_movies", DEFAULT_QUERIES["movies"],
-                                 sort=sort, page=ws_page, mode="movie")
+                                 sort=sort, page=ws_page, mode="movie",
+                                 skip_csfd=True, csfd_rescue=True)
 
     def _post(items):
         return _filter_year_range(items, min_year=min_y, max_year=max_y)
 
-    cache_key = f"rubrika:movies:v2:{query}:{sort}:y{min_y}-{max_y}"
+    cache_key = f"rubrika:movies:v3:{query}:{sort}:y{min_y}-{max_y}"
     return _paginate_rubrika(cache_key, _ws_fetch, ui_page=page,
                              post_filter=_post, sort_mode=sort_mode)
 
@@ -2653,6 +3493,14 @@ def _paginate_multi_query(
     max_ws_pages: int = 6,
     grouping: str = "movie",
     skip_csfd: bool = False,
+    skip_enrich: bool = False,
+    skip_poster: bool = False,
+    skip_aggressive_filters: bool = False,
+    search_query: Optional[str] = None,
+    search_year: Optional[int] = None,
+    trust_ws_query: bool = False,
+    csfd_rescue: bool = False,
+    max_wait_sec: Optional[float] = RUBRIKA_FETCH_MAX_WAIT,
 ) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Sjednoceny multi-query fetch + paginate (v0.0.53).
@@ -2669,6 +3517,11 @@ def _paginate_multi_query(
                         True = vynechat CSFD enrich (rychlejsi first-load).
                         Pouziva animated rubrika kde ma genre filter
                         prioritu nad CSFD ratingem.
+    :param skip_enrich: v0.0.92 - bez TMDB/CSFD enrich (rubrika Koncerty).
+    :param skip_poster: v0.0.101 - bez only_with_poster filtru (explicitni hledani).
+    :param skip_aggressive_filters: preskocit obf/serial/pl/lect filtry.
+    :param search_query: volitelny filtr titulu (vypnuty pri trust_ws_query).
+    :param trust_ws_query: v0.0.103 rubric search - ver WS dotazu, bez re-filtru.
     """
     def _ws_fetch(ws_page: int):
         idx = (ws_page - 1) % len(queries)
@@ -2680,11 +3533,19 @@ def _paginate_multi_query(
         if files is None or len(files) == 0:
             # Prvni rotace muze mit prazdne stranky - nepovazujeme to za konec
             return [] if ws_page < len(queries) * 3 else None
+        if search_query and not trust_ws_query:
+            files = _filter_files_for_search(files, search_query, search_year)
+            if not files:
+                return []
         if grouping == "movie":
             files = _exclude_series(files)
             return _movies_from_groups(_group_by_title(files),
                                        pre_filter=pre_filter,
-                                       skip_csfd=skip_csfd)
+                                       skip_csfd=skip_csfd,
+                                       csfd_rescue=csfd_rescue,
+                                       skip_enrich=skip_enrich,
+                                       skip_poster=skip_poster,
+                                       skip_aggressive_filters=skip_aggressive_filters)
         # series
         return _series_from_groups(_group_by_series(files))
 
@@ -2693,6 +3554,7 @@ def _paginate_multi_query(
         post_filter=post_filter,
         sort_key_override=sort_key,
         max_ws_pages=max_ws_pages,
+        max_wait_sec=max_wait_sec,
     )
 
 
@@ -2747,13 +3609,38 @@ def _read_new_dub_min_year() -> Optional[int]:
     return v
 
 
-def get_movies_new_dub(sort: str = "recent", page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
+def get_movies_new_dub(
+    sort: str = "recent",
+    page: int = 1,
+    query_override: Optional[str] = None,
+    search_year: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Filmy novinky dabované CZ/SK - vrací (items, has_more).
 
-    v0.0.53: refactor pres _paginate_multi_query (-50 radku).
+    v0.0.99: query_override = volne hledani v rubrice (bez year/dab prefiltru).
     """
-    log.debug("get_movies_new_dub(ui_page=%s)", page)
+    log.debug("get_movies_new_dub(ui_page=%s, override=%r)", page, query_override)
+    if query_override:
+        q = query_override.strip()
+        queries = _build_rubric_search_queries(
+            q, search_year,
+            extras=[f"{q} CZ", f"{q} dabing", f"{q} CZ dabing"])
+        cache_key = f"rubrika:newdub:search:v5:{q.lower()}:y{search_year or 0}"
+        return _paginate_multi_query(
+            cache_key=cache_key,
+            queries=queries,
+            ui_page=page,
+            pre_filter=None,
+            post_filter=None,
+            sort_key=lambda it: _search_sort_key(it, want_year=search_year),
+            max_ws_pages=12,
+            skip_enrich=True,
+            skip_poster=True,
+            skip_aggressive_filters=True,
+            trust_ws_query=True,
+        )
+
     user_query = _addon_query("q_movies_new_dub", DEFAULT_QUERIES["movies_new_dub"])
     cy = _current_year()
     # v0.0.63: pridan 'CZ dub' query - cca 10% Webshare souboru pouziva
@@ -2789,18 +3676,76 @@ def get_movies_new_dub(sort: str = "recent", page: int = 1) -> Tuple[List[Dict[s
         return its
 
     return _paginate_multi_query(
-        cache_key=f"rubrika:newdub:v6:{cy}:{user_query}",
+        cache_key=f"rubrika:newdub:v13:{cy}:{user_query}",
         queries=queries, ui_page=page,
         pre_filter=_pre, post_filter=_post,
         sort_key=_recent_first_sort_key,
         max_ws_pages=6,
+        skip_csfd=True,  # v0.0.128: bez ČSFD brzdy (jen TMDB plakaty)
+        csfd_rescue=True,  # v0.0.130: dopln plakaty ceskym titulum bez TMDB
     )
 
 
+def item_has_cz_dub(it: Dict[str, Any]) -> bool:
+    """True pokud polozka ma overeny CZ/SK dabing (flag z variant)."""
+    return bool(it.get("dubbed"))
+
+
+def variant_has_cz_lang(name: str) -> bool:
+    """CZ/SK dabing nebo titulky - pro quality picker z CZ rubrik."""
+    if not name:
+        return False
+    if _detect_dubbed(name):
+        return True
+    return bool(_detect_subtitles(name))
+
+
+def filter_cz_variants(variants: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Jen varianty s CZ dabingem/titulky (bez ciste EN)."""
+    out = [v for v in variants if variant_has_cz_lang(v.get("name") or "")]
+    out.sort(key=lambda v: _quality_score(v.get("name") or ""), reverse=True)
+    return out
+
+
+def _variant_matches_year(name: str, want_year: Optional[int]) -> bool:
+    """
+    Filtr roku pro picker: Michael (TMDB 2026) nesmi nabrát Michael 1996.
+
+    Soubor bez roku v nazvu projde (napr. 'Michael_cz dabing').
+    Soubor s jinym rokem se vyřadí.
+    """
+    if not want_year:
+        return True
+    file_year = _guess_year(name)
+    if file_year is None:
+        return True
+    return int(file_year) == int(want_year)
+
+
+def filter_variants_by_year(
+    variants: List[Dict[str, Any]],
+    want_year: Optional[int],
+) -> List[Dict[str, Any]]:
+    if not want_year or not variants:
+        return variants
+    out = [v for v in variants if _variant_matches_year(v.get("name") or "", want_year)]
+    # v0.0.117: spatny WS/TMDB rok nesmi zablokovat prehrani (0 variant).
+    if not out:
+        log.info("filter_variants_by_year(%s): 0 shod -> ponechavam %d variant",
+                 want_year, len(variants))
+        return variants
+    return out
+
+
+def _item_has_cz_lang(it: Dict[str, Any]) -> bool:
+    """CZ/SK dabing, titulky, nebo Dual (= casto CZ+EN na WS)."""
+    return item_has_cz_dub(it) or bool(it.get("subs_cz"))
+
+
 def _dubbed_or_subs_filter(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Jen položky, které mají CZ/SK DABING NEBO CZ/SK TITULKY."""
-    out = [it for it in items if it.get("dubbed") or it.get("subs_cz")]
-    log.debug("_dubbed_or_subs_filter: %d -> %d items (CZ dab nebo CZ tit)",
+    """Jen položky s CZ/SK dabingem, titulky, nebo Dual audio."""
+    out = [it for it in items if _item_has_cz_lang(it)]
+    log.debug("_dubbed_or_subs_filter: %d -> %d items (CZ dab/tit/dual)",
              len(items), len(out))
     return out
 
@@ -2830,7 +3775,8 @@ def _pre_filter_quality_only(min_score: int):
 
 
 def get_4k(sort: str = "recent", page: int = 1,
-           query_override: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
+           query_override: Optional[str] = None,
+           search_year: Optional[int] = None) -> Tuple[List[Dict[str, Any]], bool]:
     """Filmy v 4K (2160p / UHD). v0.0.53: refactor pres _paginate_multi_query.
 
     v0.0.62: pri search (query_override):
@@ -2843,36 +3789,43 @@ def get_4k(sort: str = "recent", page: int = 1,
     log.debug("get_4k(ui_page=%s, override=%r)", page, query_override)
     if query_override:
         q = query_override.strip()
-        # v0.0.62: bare query NA PRVNI MISTE - Webshare vrati nejvic
-        # vysledku, filter min_quality si pak vybere jen 4K. Drive jsme
-        # davali "Avatar 2160p" co je restriktivni a vynechalo soubory
-        # bez explicitniho "2160p" v nazvu.
-        queries = [q, f"{q} 2160p", f"{q} 4K", f"{q} UHD"]
-        cache_key = f"rubrika:4k:search:v3:{q.lower()}"
+        queries = _build_rubric_search_queries(
+            q, search_year, extras=[f"{q} 2160p", f"{q} 4K", f"{q} UHD"])
+        cache_key = f"rubrika:4k:search:v5:{q.lower()}:y{search_year or 0}"
         pre_filter = _pre_filter_quality_only(min_score=1000)
     else:
         queries = ["2160p CZ", "2160p", "4K CZ", "UHD CZ",
                    "2160p dabing", "2160p titulky",
                    "4K dabing", "UHD dabing",
                    "4K", "UHD", "2160p 2026", "2160p 2025"]
-        cache_key = "rubrika:4k:default:v2"
+        cache_key = "rubrika:4k:default:v3"
         pre_filter = _pre_filter_quality_dubsub(min_score=1000)
 
     return _paginate_multi_query(
         cache_key=cache_key, queries=queries, ui_page=page,
         pre_filter=pre_filter,
         sort_key=_recent_first_sort_key,
-        max_ws_pages=6,
+        max_ws_pages=8,
+        skip_enrich=bool(query_override),
+        skip_poster=bool(query_override),
+        skip_aggressive_filters=bool(query_override),
+        trust_ws_query=bool(query_override),
+        search_year=search_year,
+        skip_csfd=True,  # v0.0.128: bez ČSFD brzdy (jen TMDB plakaty)
+        csfd_rescue=not bool(query_override),  # v0.0.130: dopln plakaty
     )
-
-
-# v0.0.69: TMDB genre IDs pro filtraci v rubrice Animovane CZ/SK.
 # TMDB pouziva stabilni IDs (viz /genre/movie/list):
 #     16 = Animation
 #     10751 = Family (casto u animovanych pro deti)
 # Vystaci nam 16, protoze 10751 sam o sobe je rodinna (e.g. Home Alone)
 # ne nutne animace. Vsichni Pixar/Disney/DreamWorks/anime maji 16.
 _TMDB_GENRE_ANIMATION = 16
+_TMDB_GENRE_DOCUMENTARY = 99
+
+_DOC_FILENAME_HINTS = (
+    "dokument", "documentary", "doku", "nature", "planet", "wild",
+    "national geographic", "bbc earth", "čt", "ct ", "13. komnata",
+)
 
 
 # v0.0.69 + perf fix: high-signal filename hints pro animaci.
@@ -2971,8 +3924,72 @@ def _post_filter_animated(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _has_documentary_filename_hint(item: Dict[str, Any]) -> bool:
+    names = " ".join([
+        item.get("base_title") or "",
+        item.get("title") or "",
+        item.get("ws_names") or "",
+    ]).lower()
+    return any(h in names for h in _DOC_FILENAME_HINTS)
+
+
+def _post_filter_documentary(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Prijme polozky s TMDB zanrem Dokument (99) nebo dokument hint v nazvu."""
+    out = []
+    for it in items:
+        gids = {int(g) for g in (it.get("genre_ids") or [])}
+        if _TMDB_GENRE_DOCUMENTARY in gids:
+            out.append(it)
+        elif _has_documentary_filename_hint(it):
+            out.append(it)
+    log.debug("_post_filter_documentary: %d -> %d", len(items), len(out))
+    return out
+
+
+def get_movies_documentary(sort: str = "recent", page: int = 1,
+                           query_override: Optional[str] = None,
+                           search_year: Optional[int] = None,
+                           ) -> Tuple[List[Dict[str, Any]], bool]:
+    """Dokumentární filmy CZ/SK – TMDB žánr 99 + WS dotazy."""
+    log.debug("get_movies_documentary(ui_page=%s, override=%r)", page, query_override)
+    min_quality = _read_animated_min_quality()
+
+    if query_override:
+        q = query_override.strip()
+        queries = _build_rubric_search_queries(
+            q, search_year, extras=[f"{q} dokument", f"{q} documentary", f"{q} CZ"])
+        cache_key = (f"rubrika:documentary:search:v1:q{min_quality}:"
+                     f"{q.lower()}:y{search_year or 0}")
+        pre_filter = _pre_filter_quality_only(min_score=min_quality)
+    else:
+        queries = [
+            "dokument CZ", "dokumentární CZ", "dokumentarni CZ",
+            "documentary CZ", "doku CZ", "nature documentary CZ",
+            "National Geographic CZ", "BBC Earth CZ",
+            "dokument dabing", "dokument titulky",
+            "dokument 2026", "dokument 2025",
+        ]
+        cache_key = f"rubrika:documentary:default:v1:q{min_quality}"
+        pre_filter = _pre_filter_quality_dubsub(min_score=min_quality)
+
+    return _paginate_multi_query(
+        cache_key=cache_key, queries=queries, ui_page=page,
+        pre_filter=pre_filter,
+        post_filter=_post_filter_documentary,
+        sort_key=_recent_first_sort_key,
+        max_ws_pages=6,
+        skip_csfd=True,
+        skip_enrich=bool(query_override),
+        skip_poster=bool(query_override),
+        skip_aggressive_filters=bool(query_override),
+        trust_ws_query=bool(query_override),
+        search_year=search_year,
+    )
+
+
 def get_movies_animated(sort: str = "recent", page: int = 1,
-                         query_override: Optional[str] = None
+                         query_override: Optional[str] = None,
+                         search_year: Optional[int] = None,
                          ) -> Tuple[List[Dict[str, Any]], bool]:
     """Filmy animovane CZ/SK - vraci (items, has_more).
 
@@ -2992,9 +4009,10 @@ def get_movies_animated(sort: str = "recent", page: int = 1,
 
     if query_override:
         q = query_override.strip()
-        queries = [q, f"{q} CZ", f"{q} dabing"]
-        cache_key = (f"rubrika:animated:search:v2:q{min_quality}:"
-                     f"{q.lower()}")
+        queries = _build_rubric_search_queries(
+            q, search_year, extras=[f"{q} CZ", f"{q} dabing", f"{q} animovany"])
+        cache_key = (f"rubrika:animated:search:v4:q{min_quality}:"
+                     f"{q.lower()}:y{search_year or 0}")
         pre_filter = _pre_filter_quality_only(min_score=min_quality)
     else:
         # v0.0.69 perf: tight, high-signal queries (~95% precision).
@@ -3022,15 +4040,19 @@ def get_movies_animated(sort: str = "recent", page: int = 1,
         pre_filter=pre_filter,
         post_filter=_post_filter_animated,
         sort_key=_recent_first_sort_key,
-        max_ws_pages=4,  # v0.0.69 perf: 6 -> 4 (with filename hint bypass)
-        skip_csfd=True,  # v0.0.70 perf: animated rubrika nepotrebuje CSFD
-                         # rating - TMDB stacil. CSFD je dominantni bottleneck
-                         # na cold cache (Cloudflare scrape ~2s per item).
+        max_ws_pages=6,
+        skip_csfd=True,
+        skip_enrich=bool(query_override),
+        skip_poster=bool(query_override),
+        skip_aggressive_filters=bool(query_override),
+        trust_ws_query=bool(query_override),
+        search_year=search_year,
     )
 
 
 def get_bluray(sort: str = "recent", page: int = 1,
-               query_override: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
+               query_override: Optional[str] = None,
+               search_year: Optional[int] = None) -> Tuple[List[Dict[str, Any]], bool]:
     """Filmy BluRay. v0.0.53: refactor pres _paginate_multi_query.
 
     v0.0.62: stejne jako get_4k - bare query + relax filter pri search.
@@ -3038,22 +4060,30 @@ def get_bluray(sort: str = "recent", page: int = 1,
     log.debug("get_bluray(ui_page=%s, override=%r)", page, query_override)
     if query_override:
         q = query_override.strip()
-        queries = [q, f"{q} BluRay", f"{q} BDRip", f"{q} BD"]
-        cache_key = f"rubrika:bluray:search:v3:{q.lower()}"
+        queries = _build_rubric_search_queries(
+            q, search_year, extras=[f"{q} BluRay", f"{q} BDRip", f"{q} BD"])
+        cache_key = f"rubrika:bluray:search:v5:{q.lower()}:y{search_year or 0}"
         pre_filter = _pre_filter_quality_only(min_score=800)
     else:
         queries = ["BluRay CZ", "BluRay dabing", "BluRay titulky",
                    "Blu-ray CZ", "BDRip CZ", "BD CZ",
                    "BluRay 1080p CZ", "BluRay 2160p CZ",
                    "BluRay 2026", "BluRay 2025", "BluRay 2024", "BluRay"]
-        cache_key = "rubrika:bluray:default:v2"
+        cache_key = "rubrika:bluray:default:v3"
         pre_filter = _pre_filter_quality_dubsub(min_score=800)
 
     return _paginate_multi_query(
         cache_key=cache_key, queries=queries, ui_page=page,
         pre_filter=pre_filter,
         sort_key=_recent_first_sort_key,
-        max_ws_pages=6,
+        max_ws_pages=8,
+        skip_enrich=bool(query_override),
+        skip_poster=bool(query_override),
+        skip_aggressive_filters=bool(query_override),
+        trust_ws_query=bool(query_override),
+        search_year=search_year,
+        skip_csfd=True,  # v0.0.128: bez ČSFD brzdy (jen TMDB plakaty)
+        csfd_rescue=not bool(query_override),  # v0.0.130: dopln plakaty
     )
 
 
@@ -3247,46 +4277,61 @@ def _read_latest_min_year() -> Optional[int]:
     return v
 
 
-def get_latest(sort: str = "recent", page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
+def get_latest(
+    sort: str = "recent",
+    page: int = 1,
+    query_override: Optional[str] = None,
+    search_year: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Novinky – primárně letošní / loňské filmy (dabing + titulky).
 
-    Strategie:
-      1) Multi-query na Webshare (rotace po WS stránkách):
-            "<cy>"                       - vše z aktuálního roku
-            "<cy> CZ"                    - CZ dabing aktuální rok
-            "<cy> titulky"               - CZ titulky aktuální rok
-            "<py>"                       - vše z předchozího roku
-            "<py> CZ"                    - CZ dabing předchozí rok
-            "<py> titulky"               - CZ titulky předchozí rok
-            user_query                   - uživatelův dotaz (default "1080p")
-      2) Sort celého bufferu podle ROKU DESC (year-first), takže
-         uživatel vidí 2026/2025 vždy nahoře.
-      3) Volitelný filtr 'latest_min_year' (default = current_year - 1).
-         Filmy bez známého roku projdou (často to jsou novinky bez TMDB).
-
-    Vrací (items, has_more).
+    v0.0.99: query_override = volne hledani v rubrice (jako 4K).
     """
-    log.debug("get_latest(sort=%s, ui_page=%s)", sort, page)
+    log.debug("get_latest(sort=%s, ui_page=%s, override=%r)", sort, page, query_override)
+    if query_override:
+        q = query_override.strip()
+        queries = _build_rubric_search_queries(
+            q, search_year,
+            extras=[f"{q} CZ", f"{q} titulky", f"{q} dabing"])
+        cache_key = f"rubrika:latest:search:v5:{q.lower()}:y{search_year or 0}"
+        return _paginate_multi_query(
+            cache_key=cache_key,
+            queries=queries,
+            ui_page=page,
+            pre_filter=None,
+            post_filter=None,
+            sort_key=lambda it: _search_sort_key(it, want_year=search_year),
+            max_ws_pages=12,
+            skip_enrich=True,
+            skip_poster=True,
+            skip_aggressive_filters=True,
+            trust_ws_query=True,
+        )
+
     user_query = _addon_query("q_latest", DEFAULT_QUERIES["latest"])
     cy = _current_year()
     py = cy - 1
 
-    # Rotace queries - pokrývá rok / CZ dabing / CZ titulky pro novinky.
+    # Rotace dotazu na Webshare (NE TMDB) - rok / CZ / dabing / titulky.
     queries = [
         str(cy),
         f"{cy} CZ",
+        f"{cy} dabing",
+        f"{cy} CZ dabing",
         f"{cy} titulky",
+        f"{cy} CZ titulky",
         str(py),
         f"{py} CZ",
+        f"{py} dabing",
         f"{py} titulky",
         user_query,
     ]
 
     def _pre_filter(items):
-        """1080p+ + CZ/SK titulky - z nazvu souboru, BEZ TMDB enrichmentu."""
-        items = _min_quality_filter(items, min_score=800)
-        items = _subs_only_filter(items)
+        """720p+ + CZ dab / titulky / Dual (v0.0.103)."""
+        items = _min_quality_filter(items, min_score=600)
+        items = _dubbed_or_subs_filter(items)
         return items
 
     def _ws_fetch(ws_page: int):
@@ -3303,20 +4348,25 @@ def get_latest(sort: str = "recent", page: int = 1) -> Tuple[List[Dict[str, Any]
         if files is None or len(files) == 0:
             return [] if ws_page < len(queries) * 3 else None
         files = _exclude_series(files)
+        # v0.0.128: skip_csfd=True - bez ČSFD brzdy (jen TMDB plakaty)
+        # v0.0.130: csfd_rescue=True - dopln plakaty ceskym titulum bez TMDB
         return _movies_from_groups(_group_by_title(files),
-                                   pre_filter=_pre_filter)
+                                   pre_filter=_pre_filter,
+                                   skip_csfd=True,
+                                   csfd_rescue=True)
 
     def _filter_combined(items):
-        # POST-FILTR (po TMDB enrichmentu): jen rok, ktery potrebuje TMDB.
         min_y = _read_latest_min_year()
         if min_y is not None:
-            items = [it for it in items
-                     if int(it.get("year") or 0) == 0
-                     or int(it.get("year") or 0) >= min_y]
+            kept = []
+            for it in items:
+                eff = _effective_release_year(it)
+                if eff == 0 or eff >= min_y:
+                    kept.append(it)
+            items = kept
         return items
 
-    # v5 = bump cache (v0.0.62: max_ws_pages 8->6 pro rychlejsi first load)
-    cache_key = f"rubrika:latest:v5:{cy}:{user_query}"
+    cache_key = f"rubrika:latest:v9:{cy}:{user_query}"
     # v0.0.63: kratsi TTL 10 min (defaultne 30 min) - "Novinky" je
     # semanticky o cerstvosti, ne o rychlosti opetovneho otevreni.
     return _paginate_rubrika(
@@ -3357,7 +4407,7 @@ def _collect_episodes_files(series_name: str,
     if not series_name:
         return []
 
-    cache_key = f"episodes_files:v3:{_norm_compare(series_name)}"
+    cache_key = f"episodes_files:v6:{_norm_compare(series_name)}"
     if force_refresh:
         try:
             cache.cache_delete(cache_key)
@@ -3372,7 +4422,6 @@ def _collect_episodes_files(series_name: str,
                      series_name, len(cached))
             return list(cached)
 
-    target_series = _norm_compare(series_name)
     all_files: List[Dict[str, Any]] = []
 
     # Vytvoříme seznam queries k vyzkoušení:
@@ -3413,18 +4462,29 @@ def _collect_episodes_files(series_name: str,
                 added = 0
                 for f in files:
                     name = f.get("name") or ""
-                    if not _SERIES_PATTERN.search(name):
+                    s, e = _parse_episode(name, series_name)
+                    if s is None or e is None:
                         continue
                     ident = f.get("ident") or ""
                     if ident in seen_idents:
                         continue
-                    detected = _series_name(name)
-                    det_norm = _norm_compare(detected)
-                    if target_series in det_norm or det_norm in target_series:
-                        all_files.append(f)
-                        seen_idents.add(ident)
-                        added += 1
-                        new_in_this_query += 1
+                    if _parse_se(name)[0] is not None:
+                        detected = _series_name(name)
+                    else:
+                        detected = _ct.clean_title(
+                            re.split(
+                                r"epizod[a]?|d[ií]l|diel|č[aá]st|cast",
+                                name,
+                                maxsplit=1,
+                                flags=re.I,
+                            )[0],
+                        ) or _series_name(name)
+                    if not _series_title_match_for_episodes(series_name, detected):
+                        continue
+                    all_files.append(f)
+                    seen_idents.add(ident)
+                    added += 1
+                    new_in_this_query += 1
                 if added == 0 and p > 1:
                     break
         log.info("_collect_episodes_files: query[%d]=%r -> %d novych souboru",
@@ -3440,7 +4500,13 @@ def _collect_episodes_files(series_name: str,
              series_name, len(all_files))
 
     classify_files(all_files)
-    cache.cache_set(cache_key, all_files)
+    if all_files:
+        cache.cache_set(cache_key, all_files)
+    else:
+        try:
+            cache.cache_delete(cache_key)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cache_delete empty %s: %s", cache_key, exc)
     return all_files
 
 
@@ -3454,6 +4520,80 @@ def _parse_se(name: str) -> Tuple[Optional[int], Optional[int]]:
     if not m2:
         return None, None
     return int(m2.group(1)), int(m2.group(2))
+
+
+# v0.0.119: Voyo / reality uploady bez SxxEyy ("Ruza pre nevestu epizoda 1").
+# v0.0.120: SK "1. diel", "5 dil", cislo pred/po markerem.
+_ALT_EP_PATTERNS = (
+    re.compile(r"epizod[a]?[\W_]*(\d{1,2})", re.I),
+    re.compile(r"(\d{1,2})[\W_]*epizod[a]?", re.I),
+    re.compile(r"d[ií]l[\W_]*(\d{1,2})", re.I),
+    re.compile(r"(\d{1,2})[\W_.]*d[ií]l", re.I),
+    re.compile(r"diel[\W_]*(\d{1,2})", re.I),
+    re.compile(r"(\d{1,2})[\W_.]*diel", re.I),
+    re.compile(r"č[aá]st[\W_]*(\d{1,2})", re.I),
+    re.compile(r"(\d{1,2})[\W_.]*č[aá]st", re.I),
+    re.compile(r"cast[\W_]*(\d{1,2})", re.I),
+    re.compile(r"(\d{1,2})[\W_.]*cast", re.I),
+)
+
+
+def _parse_episode_alt(
+    name: str,
+    series_name: str,
+) -> Tuple[Optional[int], Optional[int]]:
+    """Epizoda z epizoda/díl/část nebo trailing čísla — jen po shodě názvu seriálu."""
+    if not name or not series_name:
+        return None, None
+    for pat in _ALT_EP_PATTERNS:
+        m = pat.search(name)
+        if not m:
+            continue
+        try:
+            ep = int(m.group(1))
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= ep <= 99):
+            continue
+        prefix = _ct.clean_title(name[:m.start()])
+        if prefix and _series_title_match_for_episodes(series_name, prefix):
+            return 1, ep
+    cleaned = _ct.clean_title(name)
+    m = _TRAILING_NUM_RE.match(cleaned)
+    if m:
+        try:
+            ep = int(m.group(2))
+        except (TypeError, ValueError):
+            return None, None
+        prefix = m.group(1).strip()
+        if 1 <= ep <= 99 and _series_title_match_for_episodes(series_name, prefix):
+            return 1, ep
+    return None, None
+
+
+def _parse_episode(
+    name: str,
+    series_name: Optional[str] = None,
+) -> Tuple[Optional[int], Optional[int]]:
+    """SxxEyy nebo alt parser (epizoda/díl/část) s validací proti series_name."""
+    s, e = _parse_se(name)
+    if s is not None:
+        return s, e
+    if series_name:
+        return _parse_episode_alt(name, series_name)
+    return None, None
+
+
+def _episode_base_for_series(
+    series_name: str,
+    season: int,
+    episode: int,
+    filename: str,
+) -> str:
+    """Stabilní base_title pro play_pick — SxxEyy z názvu nebo syntetický."""
+    if _parse_se(filename)[0] is not None:
+        return _episode_base_title(filename)
+    return f"{series_name.strip()} S{int(season):02d}E{int(episode):02d}"
 
 
 def get_series_seasons(series_name: str,
@@ -3512,7 +4652,7 @@ def get_series_seasons(series_name: str,
     ws_season_counts: Dict[int, int] = {}
     ws_episodes_per_season: Dict[int, set] = {}
     for f in files:
-        s, e = _parse_se(f.get("name") or "")
+        s, e = _parse_episode(f.get("name") or "", series_name)
         if s is None:
             continue
         ws_episodes_per_season.setdefault(s, set()).add(e)
@@ -3620,12 +4760,12 @@ def get_series_episodes(series_name: str,
     if season is not None:
         season_int = int(season)
         files = [f for f in files
-                 if _parse_se(f.get("name") or "")[0] == season_int]
+                 if _parse_episode(f.get("name") or "", series_name)[0] == season_int]
 
     # Seskup podle SxxEyy klíče
     by_ep: Dict[str, List[Dict[str, Any]]] = {}
     for f in files:
-        s, e = _parse_se(f.get("name") or "")
+        s, e = _parse_episode(f.get("name") or "", series_name)
         if s is None or e is None:
             continue
         ep_key = f"S{s:02d}E{e:02d}"
@@ -3649,8 +4789,9 @@ def get_series_episodes(series_name: str,
             continue
         best = variants[0]
         is_dubbed = any(_detect_dubbed(v.get("name") or "") for v in variants)
-        base = _episode_base_title(best.get("name") or "")
-        s_num, e_num = _parse_se(best.get("name") or "")
+        fname = best.get("name") or ""
+        s_num, e_num = _parse_episode(fname, series_name)
+        base = _episode_base_for_series(series_name, s_num or 1, e_num or 1, fname)
 
         _save_variants_cache(base, "episode", variants)
 
@@ -3695,10 +4836,47 @@ def get_series_episodes(series_name: str,
 # rubrika "Novy dabing" matchla jen 1 soubor "CZ dabing" -> picker se
 # nikdy nezobrazil (len==1 -> auto-play). User chtel videt i ostatni
 # varianty (BluRay/WEB-DL/4K) at vybira mezi kvalitou a dabingem.
-_VARIANTS_CACHE_THIN_THRESHOLD = 3
+_VARIANTS_CACHE_MIN_EXPAND = 8
 
 
-def get_quality_variants(base_title: str, mode: str = "movie") -> List[Dict[str, Any]]:
+def _fetch_ws_files_for_title(
+    base_title: str,
+    max_pages: int = 2,
+    year: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """v0.0.104: vice WS dotazu + stranek pro quality picker (Michael ~46 variant)."""
+    clean = (_normalize_title(base_title) or base_title or "").strip()
+    if not clean:
+        return []
+    if year is None:
+        year = _guess_year(base_title) or _guess_year(clean)
+    if not year:
+        try:
+            year = _ct.extract_year(base_title)
+        except Exception:  # noqa: BLE001
+            year = None
+    queries = _search_alt_queries(clean, year=year)
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for q in queries[:8]:
+        for page in range(1, max_pages + 1):
+            files = search_videos(query=q, sort="rating", page=page)
+            if not files:
+                break
+            for f in files:
+                ident = f.get("ident") or f.get("id") or ""
+                if ident and ident not in seen:
+                    seen.add(ident)
+                    out.append(f)
+    return out
+
+
+def get_quality_variants(
+    base_title: str,
+    mode: str = "movie",
+    cz_only: bool = False,
+    year: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """
     Pro daný base_title vrátí všechny varianty (různé kvality).
 
@@ -3716,7 +4894,21 @@ def get_quality_variants(base_title: str, mode: str = "movie") -> List[Dict[str,
 
     :param mode: 'movie' / 'series' (klíč v cache) nebo 'episode'
                  (re-search podle SxxEyy).
+    :param cz_only: True = jen CZ dab/tit/Dual (rubrika Novinky dabovane).
+    :param year: TMDB/WS rok titulu - filtruje jine filmy se stejnym nazvem.
     """
+    def _finalize(variants: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out = variants
+        if year and out:
+            out = filter_variants_by_year(out, year)
+            log.info("get_quality_variants(base=%r): year=%s -> %d variant",
+                     base_title, year, len(out))
+        if cz_only and out:
+            out = filter_cz_variants(out)
+            log.info("get_quality_variants(base=%r): cz_only -> %d variant",
+                     base_title, len(out))
+        return out
+
     if not base_title:
         log.warning("get_quality_variants: prazdny base_title")
         return []
@@ -3724,19 +4916,16 @@ def get_quality_variants(base_title: str, mode: str = "movie") -> List[Dict[str,
     # 1) Cache lookup pro všechny módy (movie/series/episode).
     cached = _load_variants_cache(base_title, mode=mode, ttl=24 * 3600)
 
-    # 2) Thin-cache expand: pokud cache obsahuje <= prah variant, doplnime
-    # re-searchem. Drive: rubrika 'Novy dabing' najde Mario jen jako
-    # "CZ.dabing.camrip" -> 1 varianta -> view_play_pick auto-plays bez
-    # pickeru -> user nevidi ze existuje i 1080p WEB-DL EN.
-    if cached and len(cached) > _VARIANTS_CACHE_THIN_THRESHOLD:
+    # 2) Expand: pokud cache ma malo variant, doplnime plny WS re-search.
+    if cached and len(cached) >= _VARIANTS_CACHE_MIN_EXPAND:
         log.info("get_quality_variants(base=%r, mode=%s): cache HIT (%d variant) "
                  "- dostatecne, neprovadime expand",
                  base_title, mode, len(cached))
-        return cached
+        return _finalize(cached)
 
     if cached:
         log.info("get_quality_variants(base=%r, mode=%s): cache HIT (%d variant) "
-                 "- THIN, doplnujem re-searchem",
+                 "- malo, doplnujem re-searchem",
                  base_title, mode, len(cached))
 
     # 3) Re-search na Webshare (full miss nebo thin expand).
@@ -3745,25 +4934,29 @@ def get_quality_variants(base_title: str, mode: str = "movie") -> List[Dict[str,
     # raději hledat jen 'Series Name' (= víc kandidátů) a pak je filtrujeme
     # lokálně podle SxxEyy markeru a porovnání base_title.
     target = _norm_compare(base_title)
+    episode_series = ""
+    episode_se: Optional[Tuple[int, int]] = None
 
     if mode == "episode":
         m = re.search(r"(.+?)\s+S(\d{1,2})\s*[EX]\s*(\d{1,3})", base_title, re.I)
         if m:
-            series_part = m.group(1).strip()
+            episode_series = m.group(1).strip()
+            episode_se = (int(m.group(2)), int(m.group(3)))
             log.info("get_quality_variants(episode): query='%s' (z base=%r)",
-                     series_part, base_title)
-            files = search_videos(query=series_part, sort="rating", page=1)
+                     episode_series, base_title)
+            files = search_videos(query=episode_series, sort="rating", page=1)
         else:
+            episode_series = _series_name(base_title) or base_title
             files = search_videos(query=base_title, sort="rating", page=1)
     else:
-        files = search_videos(query=base_title, sort="rating", page=1)
+        files = _fetch_ws_files_for_title(base_title, year=year)
 
     if not files:
         if cached:
             # Re-search nepomohol, vratime alespon stary cache.
             log.info("get_quality_variants(base=%r): expand re-search 0 souboru, "
                      "vracim %d cached", base_title, len(cached))
-            return cached
+            return _finalize(cached)
         log.warning("get_quality_variants(base=%r, mode=%s): re-search vratil 0 souboru",
                     base_title, mode)
         return []
@@ -3772,27 +4965,25 @@ def get_quality_variants(base_title: str, mode: str = "movie") -> List[Dict[str,
     for f in files:
         name = f.get("name") or ""
         if mode == "episode":
-            candidate = _episode_base_title(name)
-        elif mode == "series":
-            candidate = _series_name(name)
+            if not episode_series:
+                episode_series = _series_name(base_title) or base_title
+            s, e = _parse_episode(name, episode_series)
+            if s is None or e is None:
+                continue
+            if episode_se is not None and (s, e) != episode_se:
+                continue
+            matching.append(f)
         else:
-            candidate = _normalize_title(name)
-        cand_norm = _norm_compare(candidate)
-        if not cand_norm:
-            continue
-        # v0.0.78: STRIKTNI tokenized matching - drive 'target in cand_norm'
-        # bylo prilis tolerantni a pro "Michael" matchlo "Michael Jordan"
-        # a "George Michael". Ted vyzaduje rovnost sady slov (year a quality
-        # tagy se ignoruji).
-        if mode == "episode":
-            # Pro epizody zachovavame puvodni logiku - SxxEyy uz dostatecne
-            # specificke a krome toho jsou jmena serialu casto velmi podobna
-            # nez aby tokenized match fungoval (napr. "House M.D." vs "House").
-            if cand_norm == target or target in cand_norm or cand_norm in target:
-                matching.append(f)
-        else:
+            if mode == "series":
+                candidate = _series_name(name)
+            else:
+                candidate = _normalize_title(name)
+            cand_norm = _norm_compare(candidate)
+            if not cand_norm:
+                continue
             if cand_norm == target or _title_tokens_match(base_title, candidate):
-                matching.append(f)
+                if _variant_matches_year(name, year):
+                    matching.append(f)
 
     fresh_variants = _files_to_variant_refs(matching)
 
@@ -3819,15 +5010,15 @@ def get_quality_variants(base_title: str, mode: str = "movie") -> List[Dict[str,
     if fresh_variants:
         _save_variants_cache(base_title, mode, fresh_variants)
 
-    return fresh_variants
+    return _finalize(fresh_variants)
 
 
 # ---------------------------------------------------------------------------
 # 5c) TMDB discover -> Webshare filter (v0.0.82)
 # ---------------------------------------------------------------------------
 
-TMDB_WS_FILTER_WORKERS = 4
-TMDB_WS_FILTER_MAX_WAIT = 14
+TMDB_WS_FILTER_WORKERS = 6
+TMDB_WS_FILTER_MAX_WAIT = 8
 
 
 def _ws_files_for_tmdb_title(title: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -3948,47 +5139,63 @@ def tmdb_series_meta_to_ws_item(meta: Dict[str, Any]) -> Optional[Dict[str, Any]
     title = (meta.get("title") or meta.get("original") or "").strip()
     if not title:
         return None
-    files = search_videos(query=title, sort="rating", page=1)
-    if not files:
+    queries = [title]
+    folded = _ct.ascii_fold(title)
+    if folded.lower() != title.lower():
+        queries.append(folded)
+    slug = (meta.get("voyo_slug") or "").strip()
+    if slug and slug.lower() not in [q.lower() for q in queries]:
+        queries.append(slug.replace("-", " "))
+
+    best_fs: Optional[List[Dict[str, Any]]] = None
+    for q in queries:
+        files = search_videos(query=q, sort="rating", page=1)
+        if not files:
+            continue
+        groups = _group_by_series(files)
+        for sname, fs in groups.items():
+            if not _series_title_match(title, sname):
+                continue
+            if best_fs is None or len(fs) > len(best_fs):
+                best_fs = fs
+        if best_fs:
+            break
+
+    if not best_fs:
         return None
-    groups = _group_by_series(files)
-    target = _norm_compare(title)
-    for sname, fs in groups.items():
-        if not (_norm_compare(sname) == target or _title_tokens_match(title, sname)):
-            continue
-        variants = _files_to_variant_refs(fs)
-        if not variants:
-            continue
-        _save_variants_cache(sname, "series", variants)
-        item = {
-            "id": "",
-            "title": title,
-            "title_localized": title,
-            "year": meta.get("year"),
-            "plot": meta.get("plot") or "",
-            "poster": meta.get("poster") or None,
-            "fanart": meta.get("fanart") or meta.get("poster"),
-            "type": "series",
-            "series_name": sname,
-            "variant_idents": [v["ident"] for v in variants],
-            "variants_count": len(variants),
-            "tmdb_id": meta.get("tmdb_id"),
-            "rating": float(meta.get("rating") or 0),
-            "votes": int(meta.get("votes") or 0),
-            "popularity": float(meta.get("popularity") or 0),
-        }
-        gids = list(meta.get("genre_ids") or [])
-        if gids:
-            from . import tmdb as _tmdb
-            item["genre_ids"] = gids
-            item["genre_names"] = _tmdb.genre_names_for_ids(gids, "tv")
-        if meta.get("_extra_plot"):
-            extra = str(meta["_extra_plot"]).strip()
-            if extra:
-                item["plot"] = extra + (
-                    ("\n" + item["plot"]) if item.get("plot") else "")
-        return item
-    return None
+
+    variants = _files_to_variant_refs(best_fs)
+    if not variants:
+        return None
+    _save_variants_cache(title, "series", variants)
+    item = {
+        "id": "",
+        "title": title,
+        "title_localized": title,
+        "year": meta.get("year"),
+        "plot": meta.get("plot") or "",
+        "poster": meta.get("poster") or None,
+        "fanart": meta.get("fanart") or meta.get("poster"),
+        "type": "series",
+        "series_name": title,
+        "variant_idents": [v["ident"] for v in variants],
+        "variants_count": len(variants),
+        "tmdb_id": meta.get("tmdb_id"),
+        "rating": float(meta.get("rating") or 0),
+        "votes": int(meta.get("votes") or 0),
+        "popularity": float(meta.get("popularity") or 0),
+    }
+    gids = list(meta.get("genre_ids") or [])
+    if gids:
+        from . import tmdb as _tmdb
+        item["genre_ids"] = gids
+        item["genre_names"] = _tmdb.genre_names_for_ids(gids, "tv")
+    if meta.get("_extra_plot"):
+        extra = str(meta["_extra_plot"]).strip()
+        if extra:
+            item["plot"] = extra + (
+                ("\n" + item["plot"]) if item.get("plot") else "")
+    return item
 
 
 def filter_tmdb_movies_on_webshare(
@@ -4000,7 +5207,8 @@ def filter_tmdb_movies_on_webshare(
     if not metas:
         return []
     results: List[Dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = [pool.submit(tmdb_movie_meta_to_ws_item, m) for m in metas]
         pending = set(futures)
         budget = float(max_wait)
@@ -4014,6 +5222,8 @@ def filter_tmdb_movies_on_webshare(
                         results.append(item)
                 except Exception as exc:  # noqa: BLE001
                     log.debug("tmdb_movie_meta_to_ws_item selhal: %s", exc)
+    finally:
+        _shutdown_pool(pool)  # v0.0.136: neblokovat vypinani Kodi
     log.info("filter_tmdb_movies_on_webshare: %d TMDB -> %d na WS",
              len(metas), len(results))
     return results
@@ -4028,7 +5238,8 @@ def filter_tmdb_series_on_webshare(
     if not metas:
         return []
     results: List[Dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = [pool.submit(tmdb_series_meta_to_ws_item, m) for m in metas]
         pending = set(futures)
         budget = float(max_wait)
@@ -4042,6 +5253,8 @@ def filter_tmdb_series_on_webshare(
                         results.append(item)
                 except Exception as exc:  # noqa: BLE001
                     log.debug("tmdb_series_meta_to_ws_item selhal: %s", exc)
+    finally:
+        _shutdown_pool(pool)  # v0.0.136: neblokovat vypinani Kodi
     log.info("filter_tmdb_series_on_webshare: %d TMDB -> %d na WS",
              len(metas), len(results))
     return results
@@ -4071,61 +5284,204 @@ def filter_discovery_titles_on_webshare(
 # 6) HLEDÁNÍ – uživatelský dotaz
 # ---------------------------------------------------------------------------
 
-def _search_alt_queries(query: str) -> List[str]:
+def _build_rubric_search_queries(
+    q: str,
+    search_year: Optional[int] = None,
+    extras: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    v0.0.100: Sestavi WS dotazy pro hledani v rubrice.
+
+    U kratkych nazvu (Michael) davame rok NA PRVNI MISTO - bare query
+    jinak zaplavi vysledky jinymi 'Michael' a pagination dedup je pak
+  nevrati.
+    """
+    q = (q or "").strip()
+    if not q:
+        return []
+    seen: set = set()
+    out: List[str] = []
+
+    def _add(s: str) -> None:
+        k = re.sub(r"\s+", " ", (s or "").strip().lower())
+        if k and k not in seen:
+            seen.add(k)
+            out.append(s.strip())
+
+    cy = _current_year()
+    if search_year:
+        _add(f"{q} {search_year}")
+        _add(f"{q} {search_year} CZ")
+        _add(f"{q} {search_year} dabing")
+    elif " " not in q and len(q) >= 3:
+        _add(f"{q} {cy}")
+        _add(f"{q} {cy} CZ")
+        _add(f"{q} {cy} dabing")
+        _add(f"{q} {cy - 1}")
+    _add(q)
+    if extras:
+        for e in extras:
+            _add(e)
+    return out
+
+
+def _file_matches_search_title(
+    fname: str, query: str, year: Optional[int] = None,
+) -> bool:
+    """
+    Shoda dotazu s nazvem souboru.
+
+    v0.0.103: U WS vysledku akceptuj i cele slovo v raw nazvu (scene tagy
+    v clean_title jinak rozbiji striktni token match).
+    """
+    q_tokens = _title_meaningful_tokens(query)
+    if not q_tokens:
+        return False
+    norm = _normalize_title(fname)
+    fname_l = (fname or "").lower()
+    matched = False
+    if norm:
+        if len(q_tokens) == 1:
+            if _title_tokens_match(query, norm):
+                matched = True
+            elif _title_meaningful_tokens(norm) == q_tokens:
+                matched = True
+        elif q_tokens.issubset(_title_meaningful_tokens(norm)):
+            matched = True
+    if not matched and len(q_tokens) == 1:
+        qword = list(q_tokens)[0]
+        if re.search(rf"(?<![\w]){re.escape(qword)}(?![\w])", fname_l):
+            cand = _title_meaningful_tokens(norm) if norm else set()
+            extra = cand - q_tokens
+            if not extra or extra == q_tokens:
+                matched = True
+            elif len(extra) == 1 and list(extra)[0] not in (
+                "jordan", "george", "jackson", "collins", "myers",
+            ):
+                matched = True
+    if not matched:
+        return False
+    if year:
+        fy = _guess_year(fname)
+        ys = str(int(year))
+        if fy and fy != int(year):
+            return False
+        if not fy and ys not in fname_l:
+            return False
+    return True
+
+
+def _filter_files_for_search(
+    files: List[Dict[str, Any]],
+    query: str,
+    year: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Nech jen WS soubory ktere odpovidaji uzivatelskemu dotazu."""
+    q = (query or "").strip()
+    if not q:
+        return files
+    out = [
+        f for f in files
+        if _file_matches_search_title(f.get("name") or "", q, year=year)
+    ]
+    log.debug("_filter_files_for_search(%r, year=%s): %d -> %d",
+              q, year, len(files), len(out))
+    return out
+
+
+def _search_alt_queries(query: str, year: Optional[int] = None) -> List[str]:
     """
     Bilingvni vyhledavani: vrati seznam dotazu k odeslani na Webshare.
 
-    Strategie:
-        [0]  puvodni dotaz (vzdy)
-        [1]  TMDB cs->en title (pokud lisi se) - "kmotr" -> "The Godfather"
-        [2]  TMDB en->cs title (pokud lisi se) - "godfather" -> "Kmotr"
-
-    Tim plugin pokryje obe varianty (Webshare obsahuje hodne en-named souboru).
+    v0.0.100: rokove varianty NA PRVNI MISTO (Michael 2026 pred bare Michael).
     """
     q = (query or "").strip()
     if not q:
         return []
-    out = [q]
+    seen: set = set()
+    out: List[str] = []
+
+    def _add(s: str) -> None:
+        k = re.sub(r"\s+", " ", (s or "").strip().lower())
+        if k and k not in seen:
+            seen.add(k)
+            out.append(s.strip())
+
+    cy = _current_year()
+    if year:
+        _add(f"{q} {year}")
+        _add(f"{q} {year} CZ")
+        _add(f"{q} {year} dabing")
+    elif " " not in q and len(q) >= 3:
+        _add(f"{q} {cy}")
+        _add(f"{q} {cy} CZ")
+        _add(f"{q} {cy} dabing")
+        _add(f"{q} {cy - 1}")
+    _add(q)
     try:
         from . import tmdb
-        # search_movie() interne zkousi cs i en a vraci nejvyssi match.
-        # Po nalezeni dotahne get_movie_details(cs-CZ) ktery doplni
-        # original_title (en) i title_localized (cs).
-        meta = tmdb.search_movie(q, year=None)
+        meta = tmdb.search_movie(q, year=year)
         if meta:
             orig = (meta.get("original_title") or "").strip()
             loc = (meta.get("title_localized")
                    or meta.get("title") or "").strip()
-            if orig and orig.lower() != q.lower() and orig not in out:
-                out.append(orig)
-            if loc and loc.lower() != q.lower() and loc not in out:
-                out.append(loc)
+            if orig:
+                if year:
+                    _add(f"{orig} {year}")
+                _add(orig)
+            if loc and loc.lower() != (orig or "").lower():
+                if year:
+                    _add(f"{loc} {year}")
+                _add(loc)
     except Exception as exc:  # noqa: BLE001
         log.debug("_search_alt_queries TMDB lookup selhal: %s", exc)
-    log.debug("_search_alt_queries(%r) -> %s", query, out)
+    log.debug("_search_alt_queries(%r, year=%s) -> %s", query, year, out)
     return out
 
 
-def search(query: str, page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
+def _filter_search_by_year(
+    items: List[Dict[str, Any]], year: Optional[int],
+) -> List[Dict[str, Any]]:
+    """v0.0.102: Pri hledani s rokem jen shodny rok (z metadat nebo nazvu)."""
+    if not year or not items:
+        return items
+    want = int(year)
+    kept: List[Dict[str, Any]] = []
+    for it in items:
+        eff = _effective_release_year(it)
+        names = " ".join([
+            it.get("ws_names") or "",
+            it.get("base_title") or "",
+            it.get("title") or "",
+        ]).lower()
+        if eff == want or str(want) in names:
+            kept.append(it)
+        else:
+            log.debug(
+                "search year_filter: skip %r (eff_year=%d, want=%d)",
+                it.get("base_title") or it.get("title"), eff, want,
+            )
+    return kept
+
+
+def search(
+    query: str,
+    page: int = 1,
+    year: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
     """
     Fulltextové vyhledávání – vrací (items, has_more).
 
-    v0.0.55 (fixy):
-      - sort="recent" (drive "rating" radil podle stazeni, ne relevance)
-      - poster_first=False (nezhazet WS relevance poradi do TMDB sortu)
-      - skip_aggressive_filters=True (user vi co hleda, ne rubrikove filtry)
-      - max_ws_pages=3 (rychla odezva, pri Dalsi-stranka donacte dalsi)
-      - bilingvni lookup pres TMDB (kmotr -> The Godfather a obracene)
-      - normalizovany cache_key (lower+strip)
+    v0.0.98: volitelny rok z klavesnice (Michael 2026) – presnejsi WS dotazy
+    a filtr starych verzi stejneho nazvu.
     """
-    log.debug("search(query=%r, ui_page=%s)", query, page)
+    log.debug("search(query=%r, year=%s, ui_page=%s)", query, year, page)
     if not query or not query.strip():
         return [], False
 
-    queries = _search_alt_queries(query)
+    queries = _search_alt_queries(query, year=year)
 
     def _ws_fetch(ws_page: int):
-        # Rotuj pres alt-queries (kmotr / The Godfather / ...).
         idx = (ws_page - 1) % len(queries)
         q_ws_page = (ws_page - 1) // len(queries) + 1
         q = queries[idx]
@@ -4135,7 +5491,6 @@ def search(query: str, page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
         if raw is None:
             return None
         if len(raw) == 0:
-            # Prazdna q strana - zkus dalsi rotaci pred ukoncenim
             return [] if ws_page < len(queries) * 2 else None
 
         movies_files: List[Dict[str, Any]] = []
@@ -4143,32 +5498,34 @@ def search(query: str, page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
         for f in raw:
             if _is_series_file(f.get("name") or ""):
                 series_files.append(f)
-            else:
+            elif _file_matches_search_title(f.get("name") or "", query, year=year):
                 movies_files.append(f)
 
         movie_items = (
             _movies_from_groups(_group_by_title(movies_files),
-                                skip_aggressive_filters=True)
+                                skip_aggressive_filters=True,
+                                skip_poster=True)
             if movies_files else []
         )
         series_items = (
             _series_from_groups(_group_by_series(series_files))
             if series_files else []
         )
-        return movie_items + series_items
+        items = movie_items + series_items
+        if year:
+            items = _filter_search_by_year(items, year)
+        return items
 
-    # Normalizovany cache key (lower + strip + collapse whitespace)
     norm = re.sub(r"\s+", " ", (query or "").strip().lower())
-    cache_key = f"rubrika:search:v3:{norm}"
+    cache_key = f"rubrika:search:v8:{norm}:y{year or 0}"
 
-    # poster_first=False: respektovat WS relevance order (drive
-    # _poster_first_sort_key prerozhazoval na zaklade plakat/rating/year).
-    # max_ws_pages=3: rychla odezva (search potrebuje rychlou zpetnou vazbu,
-    # ostatni rubriky maji 4-6).
+    max_ws = 8 if year or len(query.split()) == 1 else 3
+    sort_key = lambda it: _search_sort_key(it, want_year=year)
     return _paginate_rubrika(
         cache_key, _ws_fetch, ui_page=page,
         poster_first=False,
-        max_ws_pages=3,
+        sort_key_override=sort_key,
+        max_ws_pages=max_ws,
     )
 
 

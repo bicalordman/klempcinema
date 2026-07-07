@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -349,14 +350,44 @@ def search_movie(title: str, year: Optional[int] = None) -> Optional[Dict[str, A
     # v0.0.69 bump v7 -> v8 - meta dict ted obsahuje genre_ids pole
     # (pro rubrika "Animovane CZ/SK" filtrovani na genre_id 16).
     # Stara cache nema genre_ids, takze by filter selhal na vsem.
-    key = f"tmdb:movie:v8:{clean.lower()}:{year or ''}"
+    key = f"tmdb:movie:v10:{clean.lower()}:{year or ''}"
     cached = cache.cache_get(key, ttl=HIT_TTL)
     if cached:
         return cached
 
     log.info("search_movie: query=%r year=%s", clean, year)
 
-    found = _find_movie_tmdb_id(clean, year)
+    from .title_match import title_search_compatible, title_search_variants
+    found = None
+    for q in title_search_variants(clean, year):
+        cand = _find_movie_tmdb_id(q, year)
+        if not cand:
+            continue
+        _tid, raw = cand
+        mt = raw.get("title") or ""
+        mo = raw.get("original_title") or ""
+        if title_search_compatible(clean, q, mt, mo):
+            found = cand
+            log.info("search_movie: match pres variantu %r", q)
+            break
+        log.debug("search_movie: variant %r -> %r nekompatibilni s WS %r",
+                  q, mt or mo, clean)
+    if not found and year:
+        try:
+            if int(year) >= datetime.now().year - 1:
+                for q in title_search_variants(clean, year):
+                    cand = _find_movie_tmdb_id(q, None)
+                    if not cand:
+                        continue
+                    _tid, raw = cand
+                    mt = raw.get("title") or ""
+                    mo = raw.get("original_title") or ""
+                    if title_search_compatible(clean, q, mt, mo):
+                        found = cand
+                        log.info("search_movie: match bez roku pres %r", q)
+                        break
+        except (TypeError, ValueError):
+            pass
     if not found:
         cache.cache_set(key, {})
         log.warning("search_movie(%r, year=%s): 0 výsledků z TMDB.", clean, year)
@@ -457,6 +488,7 @@ def _find_movie_tmdb_id(query: str, year: Optional[int]) -> Optional[Tuple[int, 
             return None
         results = data["results"][:5]
         scored = []
+        from .title_match import fuzzy_title_bonus
         for r in results:
             tid = r.get("id")
             if not tid:
@@ -471,6 +503,11 @@ def _find_movie_tmdb_id(query: str, year: Optional[int]) -> Optional[Tuple[int, 
                     score += 500
                 else:
                     score -= diff * 50
+            score += fuzzy_title_bonus(
+                query,
+                r.get("title"),
+                r.get("original_title"),
+            )
             scored.append((score, tid, r))
         if not scored:
             return None
@@ -1022,6 +1059,80 @@ def get_trailer_youtube_key(tmdb_id: int, kind: str = "movie") -> Optional[str]:
     return yt_key or None
 
 
+def _tmdb_movie_cache_keys(title: str, year: Any) -> List[str]:
+    """Vsechny rozumne cache klice pro film (rok z itemu, z titulu, bez roku)."""
+    clean = _strip_title(title)
+    if not clean:
+        return []
+    years: List[Any] = []
+    if year:
+        years.append(year)
+    gy = _extract_year(title)
+    if gy and gy not in years:
+        years.append(gy)
+    years.append("")
+    keys: List[str] = []
+    seen: set = set()
+    for y in years:
+        k = f"tmdb:movie:v9:{clean.lower()}:{y or ''}"
+        if k not in seen:
+            seen.add(k)
+            keys.append(k)
+    return keys
+
+
+def prefill_movie_item_from_cache(item: Dict[str, Any]) -> bool:
+    """v0.0.112: Hydratuje item z diskove TMDB cache bez site."""
+    if not is_enabled():
+        return False
+    if item.get("tmdb_id") and item.get("poster") and item.get("title_localized"):
+        return True
+    title = item.get("base_title") or item.get("title") or ""
+    if not title:
+        return False
+    year = item.get("year")
+    if not year:
+        year = _extract_year(title)
+    try:
+        from .title_match import title_search_variants
+        titles = title_search_variants(title, year)
+    except Exception:  # noqa: BLE001
+        titles = [title]
+    seen_keys: set = set()
+    for t in titles:
+        for key in _tmdb_movie_cache_keys(t, year):
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            cached = cache.cache_get(key, ttl=HIT_TTL)
+            if not cached or not isinstance(cached, dict) or not cached:
+                continue
+            _merge_meta(item, cached, kind="movie")
+            if item.get("poster") or item.get("tmdb_id"):
+                return bool(item.get("poster"))
+    return bool(item.get("poster"))
+
+
+def prefill_series_item_from_cache(item: Dict[str, Any]) -> bool:
+    """v0.0.112: Hydratuje serial z diskove TMDB cache bez site."""
+    if not is_enabled():
+        return False
+    if item.get("tmdb_id") and item.get("poster") and item.get("title_localized"):
+        return True
+    title = item.get("title") or ""
+    if not title:
+        return False
+    clean = _strip_title(title)
+    if not clean:
+        return False
+    key = f"tmdb:tv:v3:{clean.lower()}"
+    cached = cache.cache_get(key, ttl=HIT_TTL)
+    if not cached or not isinstance(cached, dict):
+        return False
+    _merge_meta(item, cached, kind="tv")
+    return bool(item.get("poster") or item.get("tmdb_id"))
+
+
 def enrich_movie_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Doplní film metadata z TMDB. Neselhává – pokud TMDB nedostupné, vrátí item beze změny."""
     if not is_enabled():
@@ -1034,9 +1145,20 @@ def enrich_movie_item(item: Dict[str, Any]) -> Dict[str, Any]:
             item["genre_names"] = genre_names_for_ids(item["genre_ids"], "movie")
         return item
     try:
-        meta = search_movie(item.get("title") or "", item.get("year"))
+        meta = search_movie(
+            item.get("base_title") or item.get("title") or "",
+            item.get("year"),
+        )
         if meta:
-            _merge_meta(item, meta, kind="movie")
+            from .title_match import metadata_title_compatible
+            ws = (item.get("base_title") or item.get("title") or "").strip()
+            if metadata_title_compatible(
+                ws, meta.get("title") or "", meta.get("original") or "",
+            ):
+                _merge_meta(item, meta, kind="movie")
+            else:
+                log.info("enrich_movie_item: TMDB %r neodpovida WS %r",
+                         meta.get("title"), ws)
     except Exception as exc:  # noqa: BLE001
         log.debug("enrich_movie_item(%r) selhalo: %s", item.get("title"), exc)
     return item

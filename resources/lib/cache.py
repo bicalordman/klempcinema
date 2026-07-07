@@ -24,6 +24,31 @@ log = logging.getLogger("klempcinema.cache")
 
 DEFAULT_TTL = 7 * 24 * 3600  # 7 dní
 
+# v0.0.114: in-memory cache nad diskem - opakovane otevirani rubrik
+# (50+ cache_get na stranku) bylo pomale kvuli stovkam JSON open().
+_mem_lock = threading.Lock()
+_mem_cache: dict = {}  # key -> (expire_ts, value)
+_MEM_TTL = 600  # 10 min RAM cache (cross-rubric reuse)
+_MEM_CACHE_MAX = 400
+
+
+def trim_memory_cache(max_entries: int = _MEM_CACHE_MAX) -> int:
+    """Omez RAM cache – Kodi drzi interpreter mezi navigacemi."""
+    now = time.time()
+    removed = 0
+    with _mem_lock:
+        expired = [k for k, (exp, _) in _mem_cache.items() if now >= exp]
+        for k in expired:
+            _mem_cache.pop(k, None)
+            removed += 1
+        if len(_mem_cache) <= max_entries:
+            return removed
+        sorted_keys = sorted(_mem_cache, key=lambda k: _mem_cache[k][0])
+        for k in sorted_keys[: len(_mem_cache) - max_entries]:
+            _mem_cache.pop(k, None)
+            removed += 1
+    return removed
+
 
 def _profile_dir() -> str:
     """Vrátí addon profile dir (cross-platform)."""
@@ -52,6 +77,15 @@ def _key_path(key: str) -> str:
 
 def cache_get(key: str, ttl: int = DEFAULT_TTL) -> Optional[Any]:
     """Vrátí hodnotu z cache nebo None (pokud chybí / expirovala)."""
+    now = time.time()
+    with _mem_lock:
+        ent = _mem_cache.get(key)
+        if ent is not None:
+            expire_ts, val = ent
+            if now < expire_ts:
+                return val
+            _mem_cache.pop(key, None)
+
     path = _key_path(key)
     if not os.path.exists(path):
         return None
@@ -60,7 +94,10 @@ def cache_get(key: str, ttl: int = DEFAULT_TTL) -> Optional[Any]:
             blob = json.load(fp)
         if time.time() - float(blob.get("ts", 0)) > ttl:
             return None
-        return blob.get("value")
+        value = blob.get("value")
+        with _mem_lock:
+            _mem_cache[key] = (now + _MEM_TTL, value)
+        return value
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         log.debug("cache_get(%r) chyba: %s", key, exc)
         return None
@@ -80,6 +117,8 @@ def cache_set(key: str, value: Any) -> None:
             json.dump({"ts": time.time(), "key": key, "value": value}, fp,
                       ensure_ascii=False)
         os.replace(tmp, path)
+        with _mem_lock:
+            _mem_cache[key] = (time.time() + _MEM_TTL, value)
     except OSError as exc:
         log.debug("cache_set(%r) chyba: %s", key, exc)
         try:
@@ -91,6 +130,8 @@ def cache_set(key: str, value: Any) -> None:
 
 def cache_delete(key: str) -> bool:
     """v0.0.63: smaze jeden konkretni cache klic. True kdyz se neco smazalo."""
+    with _mem_lock:
+        _mem_cache.pop(key, None)
     path = _key_path(key)
     try:
         if os.path.exists(path):
@@ -135,6 +176,8 @@ def cache_clear_prefix(prefix: str) -> int:
 
 def cache_clear() -> int:
     """Smaže všechny cachované soubory. Vrací počet smazaných."""
+    with _mem_lock:
+        _mem_cache.clear()
     d = _cache_dir()
     n = 0
     try:

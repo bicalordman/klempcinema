@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.84"
+       version="0.0.137"
        provider-name="Bicalorman">
 
     <requires>
@@ -14,47 +14,14 @@
     </extension>
 
     <extension point="xbmc.addon.metadata">
-        <summary lang="cs_CZ">Filmy a seriály – vlastní knihovna ve stylu Sosáče</summary>
-        <description lang="cs_CZ">KlempCinema je video plugin pro Kodi, který umožňuje procházet rubriky Filmy a Seriály, vyhledávat tituly a přehrávat je prostřednictvím Webshare účtu. Před prvním použitím vyplňte přihlašovací údaje k Webshare v nastavení doplňku.</description>
-        <summary lang="en_GB">Movies and TV shows – custom library in Sosáč style</summary>
+        <summary lang="cs_CZ">Filmy a serialy - vlastni knihovna pro Kodi</summary>
+        <description lang="cs_CZ">KlempCinema je video plugin pro Kodi, ktery umoznuje prochazet rubriky Filmy a Serialy, vyhledavat tituly a prehravat je prostrednictvim Webshare uctu. Pred prvnim pouzitim vyplnte prihlasovaci udaje k Webshare v nastaveni doplnku.</description>
+        <summary lang="en_GB">Movies and TV shows - custom Kodi library</summary>
         <description lang="en_GB">KlempCinema is a Kodi video plugin that allows browsing Movies and TV shows sections, searching for titles and playing them via a Webshare account. Fill in your Webshare credentials in the addon settings before first use.</description>
         <platform>all</platform>
         <language>cs</language>
         <license>GPL-3.0-or-later</license>
-        <source></source>
-        <forum></forum>
-        <website></website>
-        <email></email>
-        <news>
-v0.0.84 - INSTALL FIX (addon.xml changelog zkracen)
-
-- Oprava instalace: changelog v addon.xml mel 98 KB (2000+ radku).
-  Nektere Kodi (Android TV, Xbox, starsi buildy) pri tom padaly
-  s chybou "neplatna struktura" nebo instalace vubec neskoncila.
-- Changelog zkracen na posledni verze. Kompletni historie je v README.md.
-
-v0.0.83 - VOYO + TV PROGRAM WS FILTR + MICHAEL + ZANR V POPISKU
-
-- Voyo (SK) a TV program: jen polozky s variant_idents na Webshare
-- Michael v Nove dabovane: _effective_release_year + frozen page_slices
-- Cache newdub v5 -> v6 (po Aktualizovat v rubrice)
-- Zanr u filmu/serialu v popisku (plot), ne v nazvu radku
-- TMDB genre_ids -> ceske nazvy zanru (vyzaduje TMDB API klic)
-
-v0.0.82 - JEN FILMY NA WEBSHARE + FIX OPAKOVANI PO STR. 3
-- TMDB rubriky overuji Webshare pred zobrazenim
-- WS rubriky: filtr _filter_with_webshare_files
-- Stabilni strankovani display_order (append-only)
-
-v0.0.81 - RYCHLEJSI NACITANI + SHUTDOWN
-- CSFD jen fallback na seznamech, enrich budget 6s
-- Default 30 polozek/stranku, kratsi timeouty
-
-v0.0.80 - i18n EN preklad (welcome + donate)
-v0.0.79 - Rychlejsi shutdown, donate UI, UpdateLocalAddons
-
-Starsi changelog: viz README.md v repozitari / ZIP balicku.
-        </news>
+        <news>v0.0.137 Koncerty: kratsi rozpocet nacitani + prefetch dalsi stranky stihne dobehnout -> plynule listovani i za stranou 2.</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

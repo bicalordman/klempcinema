@@ -25,7 +25,8 @@ import os
 import threading
 import time
 from queue import Queue, Empty
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, wait
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -72,6 +73,12 @@ _path_cache: Dict[str, tuple] = {}
 _path_cache_lock = threading.Lock()
 _PATH_CACHE_TTL_HIT = 300.0   # 5 min - mame stazene, nemeni se
 _PATH_CACHE_TTL_MISS = 5.0    # 5 sec - nemame, mozna se za chvili dotahne
+_MAX_PATH_CACHE = 500
+_MAX_QUEUE_PENDING = 40
+_MAX_IMAGE_BYTES = 4 * 1024 * 1024
+_WORKER_IDLE_SEC = 25
+
+_plugin_exit = threading.Event()
 
 
 def _profile_dir() -> str:
@@ -126,6 +133,39 @@ def _on_global_shutdown() -> None:
 _shutdown.register(_on_global_shutdown)
 
 
+def on_plugin_exit() -> None:
+    """Ukonci image workery po kazde navigaci (perzistentni Python)."""
+    _plugin_exit.set()
+    with _pending_lock:
+        _pending_urls.clear()
+    if _download_queue is not None:
+        try:
+            while True:
+                _download_queue.get_nowait()
+        except Empty:
+            pass
+    with _path_cache_lock:
+        if len(_path_cache) > _MAX_PATH_CACHE:
+            keep = sorted(
+                _path_cache.items(),
+                key=lambda x: x[1][1],
+                reverse=True,
+            )[:_MAX_PATH_CACHE]
+            _path_cache.clear()
+            _path_cache.update(dict(keep))
+    global _workers_started
+    with _queue_lock:
+        _workers_started = False
+    _plugin_exit.clear()
+
+
+try:
+    from . import lifecycle as _lifecycle
+    _lifecycle.register_plugin_exit(on_plugin_exit)
+except Exception:  # noqa: BLE001
+    pass
+
+
 def shutdown() -> None:
     """Manual shutdown signal (back-compat). V Kodi se obvykle vola
     automaticky pres shutdown.py - tato funkce je k dispozici jako
@@ -164,14 +204,20 @@ def _worker_loop() -> None:
     reakci na shutdown signal.
     """
     assert _download_queue is not None
-    while not _shutdown_event.is_set() and not _shutdown.is_shutting_down():
+    idle_ticks = 0
+    while (not _plugin_exit.is_set()
+           and not _shutdown_event.is_set()
+           and not _shutdown.is_shutting_down()):
         try:
-            # v0.0.64: 1s timeout misto 2s - rychlejsi exit na shutdown.
             url = _download_queue.get(timeout=1)
+            idle_ticks = 0
         except Empty:
+            idle_ticks += 1
+            if idle_ticks >= _WORKER_IDLE_SEC:
+                break
             continue
         # Check zda nas Kodi nezavolal mezi get() a stahnutim
-        if _shutdown_event.is_set() or _shutdown.is_shutting_down():
+        if _shutdown_event.is_set() or _shutdown.is_shutting_down() or _plugin_exit.is_set():
             try:
                 _download_queue.task_done()
             except Exception:  # noqa: BLE001
@@ -199,7 +245,7 @@ def _download_image(url: str) -> bool:
     """
     if not url or not url.startswith(("http://", "https://")):
         return False
-    if _shutdown_event.is_set() or _shutdown.is_shutting_down():
+    if _shutdown_event.is_set() or _shutdown.is_shutting_down() or _plugin_exit.is_set():
         return False
     dest = _local_path_for(url)
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
@@ -211,7 +257,16 @@ def _download_image(url: str) -> bool:
             if resp.status != 200:
                 log.debug("image_cache: HTTP %s pro %s", resp.status, url)
                 return False
-            data = resp.read()
+            data = bytearray()
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                data.extend(chunk)
+                if len(data) > _MAX_IMAGE_BYTES:
+                    log.debug("image_cache: obrazek prilis velky %s", url)
+                    return False
+            data = bytes(data)
     except Exception as exc:  # noqa: BLE001
         log.debug("image_cache: download error %s: %s", url, exc)
         return False
@@ -286,6 +341,13 @@ def _cleanup_lru() -> None:
         log.debug("image_cache cleanup chyba: %s", exc)
 
 
+def _local_file_ok(path: str) -> bool:
+    try:
+        return bool(path) and os.path.isfile(path) and os.path.getsize(path) > 0
+    except OSError:
+        return False
+
+
 def cached_image_path(url: str) -> str:
     """
     Vrátí cestu, kterou má Kodi použít jako art:
@@ -307,9 +369,11 @@ def cached_image_path(url: str) -> str:
     if cached_entry is not None:
         local_path, expire_ts = cached_entry
         if now < expire_ts:
-            if local_path:
+            if local_path and _local_file_ok(local_path):
                 return local_path
-            # Cached miss - vrat URL, dotahne se na pozadi
+            if local_path:
+                with _path_cache_lock:
+                    _path_cache.pop(url, None)
             return url
 
     # 2) Cache miss/expired - stat na disku
@@ -338,6 +402,8 @@ def cached_image_path(url: str) -> str:
     with _pending_lock:
         if url in _pending_urls:
             return url
+        if len(_pending_urls) >= _MAX_QUEUE_PENDING:
+            return url
         _pending_urls.add(url)
     assert _download_queue is not None
     try:
@@ -354,6 +420,63 @@ def prefetch_image(url: str) -> None:
     if not url:
         return
     cached_image_path(url)
+
+
+def warm_urls(urls: List[str], max_workers: int = 4,
+              max_urls: int = 40, total_timeout: float = 3.0) -> int:
+    """
+    v0.0.114: Paralelne stahne chybejici plakaty/fanart do lok. cache.
+    Pri prechodu Filmy -> Novinky stejne URL = okamzite zobrazeni bez site.
+    Vraci pocet uspesne stazenych.
+    """
+    if _shutdown_event.is_set() or _shutdown.is_shutting_down() or _plugin_exit.is_set():
+        return 0
+    todo: List[str] = []
+    seen: set = set()
+    for url in urls:
+        if not url or not url.startswith(("http://", "https://")):
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        dest = _local_path_for(url)
+        try:
+            if os.path.exists(dest) and os.path.getsize(dest) > 0:
+                with _path_cache_lock:
+                    _path_cache[url] = (dest, time.time() + _PATH_CACHE_TTL_HIT)
+                continue
+        except OSError:
+            pass
+        todo.append(url)
+        if len(todo) >= max_urls:
+            break
+    if not todo:
+        return 0
+    workers = min(max_workers, len(todo))
+    done = 0
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_download_image, u) for u in todo]
+            _done, pending = wait(futures, timeout=total_timeout)
+            done = len(_done)
+            for fut in pending:
+                fut.cancel()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("image_cache.warm_urls selhalo: %s", exc)
+    if done:
+        log.debug("image_cache.warm_urls: %d/%d stazeno", done, len(todo))
+    return done
+
+
+def warm_items_posters(items: List[Dict[str, Any]], max_urls: int = 40) -> int:
+    """Stahne plakaty/fanart pro seznam polozek (cross-rubric reuse)."""
+    urls: List[str] = []
+    for it in items:
+        for field in ("poster", "csfd_poster", "fanart"):
+            u = (it.get(field) or "").strip()
+            if u:
+                urls.append(u)
+    return warm_urls(urls, max_urls=max_urls)
 
 
 def stats() -> dict:
