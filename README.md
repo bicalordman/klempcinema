@@ -8,11 +8,103 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ## Instalace
 
-1. V Kodi: **Doplňky → Nainstalovat ze ZIPu**
-2. Vyber `plugin.video.klempcinema-X.Y.Z.zip`
-3. Při prvním spuštění doplněk vyzve k zadání **Webshare účtu** (vlastní jméno + heslo). Účet si je třeba pořídit zvlášť na [webshare.cz](https://webshare.cz).
+### Požadavky
 
-Doplněk funguje bez reklam, bez sběru dat. Veškerý obsah je stahován přímo z Webshare, ke kterému si uživatel sjednává vlastní VIP předplatné.
+| Co | Detail |
+|----|--------|
+| **Kodi** | verze **19 (Matrix)** nebo novější |
+| **Webshare** | vlastní účet na [webshare.cz](https://webshare.cz) (VIP předplatné u Webshare) |
+| **TMDB API klíč** | zdarma na [themoviedb.org](https://www.themoviedb.org/settings/api) — pro plakáty a metadata |
+| **Síť** | připojení k internetu |
+
+Doplněk funguje bez reklam a bez sběru dat. Obsah se stahuje přímo z Webshare pod tvým vlastním účtem.
+
+---
+
+### 1. Stažení ZIP souboru
+
+1. Otevři stránku **Releases** na GitHubu:  
+   [github.com/bicalordman/klempcinema/releases](https://github.com/bicalordman/klempcinema/releases)
+2. U nejnovější verze (např. **v0.0.137**) klikni na **`plugin.video.klempcinema-0.0.137.zip`**
+3. ZIP se stáhne do složky Stažené soubory
+
+> Stahuj vždy **nejnovější release** — ne starší ZIP z disku, pokud nevíš, že je aktuální.
+
+---
+
+### 2. Instalace v Kodi
+
+#### Windows / Linux / macOS
+
+1. Spusť **Kodi**
+2. V levém menu: **Doplňky** (ikona puzzle)
+3. Klikni na **ikonu krabice** (nahoře vlevo) → **Nainstalovat ze souboru ZIP**
+4. Najdi a vyber stažený soubor `plugin.video.klempcinema-0.0.137.zip`
+5. Počkej na hlášku **„Doplněk nainstalován"**
+
+#### Android TV / Android box
+
+1. ZIP zkopíruj na zařízení (USB, cloud, e-mail…)
+2. V Kodi: **Doplňky → Nainstalovat ze souboru ZIP**
+3. Projdí k ZIPu (např. `Download/` nebo `Internal storage/Download/`)
+4. Vyber ZIP a potvrď instalaci
+
+#### Aktualizace starší verze
+
+Pokud už máš starší KlempCinema (např. 0.0.84):
+
+1. **Doplňky → Moje doplňky → Videodoplňky → KlempCinema → Odinstalovat**
+2. **Restartuj Kodi** (úplně ukončit a znovu spustit)
+3. Nainstaluj nový ZIP podle kroku 2 výše
+
+> Přihlašovací údaje k Webshare zůstanou zachované (uložené v `userdata/addon_data`).
+
+---
+
+### 3. První spuštění — nastavení
+
+Po instalaci otevři **KlempCinema** v menu Doplňky. Při prvním spuštění:
+
+#### Webshare účet
+
+Doplněk zobrazí dialog pro zadání přihlašovacích údajů:
+
+- **Uživatelské jméno** — tvůj login na webshare.cz
+- **Heslo** — tvé heslo na webshare.cz
+
+Účet si musíš založit sám na [webshare.cz](https://webshare.cz). Doplněk žádný účet neposkytuje.
+
+Údaje lze kdykoli změnit v: **Doplňky → Moje doplňky → KlempCinema → Nastavení**
+
+#### TMDB API klíč (doporučeno)
+
+Bez TMDB klíče nebudou plakáty ani hodnocení filmů.
+
+1. Zaregistruj se na [themoviedb.org](https://www.themoviedb.org/signup)
+2. Jdi do **Nastavení → API** a vyžádej **API klíč** (typ: Developer / Personal)
+3. V Kodi: **Doplňky → Moje doplňky → KlempCinema → Nastavení → TMDB**
+4. Vlož API klíč a ulož
+
+---
+
+### 4. Ověření, že vše funguje
+
+1. Otevři **KlempCinema** z menu Doplňky
+2. Zkus rubriku **Filmy** nebo **Novinky dabované**
+3. Měly by se zobrazit položky s plakáty (po pár sekundách)
+4. Klikni na film → vyber kvalitu → přehrání by mělo začít
+
+---
+
+### Řešení problémů
+
+| Problém | Řešení |
+|---------|--------|
+| „Nepodařilo se nainstalovat doplněk ze ZIP" | Odinstaluj starou verzi, restartuj Kodi, nainstaluj znovu. Stáhni ZIP znovu z GitHub Releases. |
+| Prázdné seznamy filmů | Zkontroluj Webshare přihlášení v Nastavení doplňku. |
+| Filmy bez plakátů | Zadej TMDB API klíč v Nastavení. |
+| Pomalé načítání | Normální při prvním otevření rubriky (~10 s). Druhé otevření je okamžité (cache). |
+| Kodi se pomalu vypíná | Aktualizuj na nejnovější verzi (0.0.133+). |
 
 ---
 
