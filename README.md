@@ -8,126 +8,40 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ## Instalace
 
-### Požadavky
-
-| Co | Detail |
-|----|--------|
-| **Kodi** | verze **19 (Matrix)** nebo novější |
-| **Webshare** | vlastní účet na [webshare.cz](https://webshare.cz) (VIP předplatné u Webshare) |
-| **TMDB API klíč** | zdarma na [themoviedb.org](https://www.themoviedb.org/settings/api) — pro plakáty a metadata |
-| **Síť** | připojení k internetu |
-
-Doplněk funguje bez reklam a bez sběru dat. Obsah se stahuje přímo z Webshare pod tvým vlastním účtem.
+**Potřebuješ:** Kodi 19+, účet [Webshare](https://webshare.cz), TMDB klíč ([zdarma](https://www.themoviedb.org/settings/api)) pro plakáty.
 
 ---
 
-### Instalace z repozitáře (doporučeno — aktualizace automaticky)
+### A) Z repozitáře — doporučeno (auto-aktualizace)
 
-Adresa repozitáře (po zapnutí GitHub Pages):
+> Jednou nainstaluješ ZIP repozitáře **ze zdroje** (ne z disku). Pak už KlempCinema i updaty jdou samy.
 
-**`https://bicalordman.github.io/klempcinema/repo/`**
+1. **Nastavení → Průzkumník souborů → Přidat zdroj** → URL:
+   `https://bicalordman.github.io/klempcinema/repo/` → pojmenuj **KlempCinema Repo**
+2. **Doplňky → Nainstalovat ze ZIP** → **KlempCinema Repo** → `repository.klempcinema-1.0.0.zip`
+3. **Doplňky → Nainstalovat z repozitáře → KlempCinema Repository → KlempCinema → Instalovat**
 
-#### Jednorázové nastavení v Kodi
-
-1. **Nastavení** (ozubené kolo) → **Průzkumník souborů** → **Přidat zdroj**
-2. Do pole **„Síťové umístění protokolu"** vlož:
-   ```
-   https://bicalordman.github.io/klempcinema/repo/
-   ```
-3. **OK** → pojmenuj zdroj např. **KlempCinema Repo** → **OK**
-4. **Doplňky** → ikona krabice → **Nainstalovat ze souboru ZIP**
-5. **KlempCinema Repo** → `repository.klempcinema` → vyber  
-   **`repository.klempcinema-1.0.0.zip`**
-6. Počkej na hlášku **„Doplněk nainstalován"**
-7. **Doplňky → Nainstalovat z repozitáře → KlempCinema Repository → Video doplňky → KlempCinema → Instalovat**
-
-#### Aktualizace
-
-Kodi repozitář kontroluje sám. Nová verze se objeví v:
-
-**Doplňky → Moje doplňky → KlempCinema → Aktualizovat**
-
-(nebo hromadně přes **Doplňky → Moje doplňky → Aktualizovat vše**)
-
-> Kroky 1–6 nainstalují repozitář (stačí jednou). Krok 7 nainstaluje KlempCinema. Další verze přijdou přes **Aktualizovat** — bez ručního ZIPu.
-
-#### Zapnutí GitHub Pages (jednorázově, pro autora)
-
-1. Na GitHubu: **klempcinema → Settings → Pages**
-2. **Source:** Deploy from a branch → branch **main** → složka **/docs** → Save
-3. Po ~2 minutách ověř v prohlížeči:  
-   [bicalordman.github.io/klempcinema/repo/addons.xml](https://bicalordman.github.io/klempcinema/repo/addons.xml)
-4. Při nové verzi doplňku spusť `.\build_repo.ps1` a pushni změny v `docs/repo/` na GitHub
+**Aktualizace:** Doplňky → Moje doplňky → Aktualizovat
 
 ---
 
-### Alternativa: instalace ze ZIP (ručně)
+### B) Ze ZIPu — ručně
 
-1. Otevři stránku **Releases** na GitHubu:  
-   [github.com/bicalordman/klempcinema/releases](https://github.com/bicalordman/klempcinema/releases)
-2. U nejnovější verze (např. **v0.0.137**) klikni na **`plugin.video.klempcinema-0.0.137.zip`**
-3. ZIP se stáhne do složky Stažené soubory
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.137.zip`
+2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
-> Stahuj vždy **nejnovější release** — ne starší ZIP z disku, pokud nevíš, že je aktuální.
+Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
 
 ---
 
-### 2. Instalace ZIP v Kodi
+### Nastavení po instalaci
 
-#### Windows / Linux / macOS
-
-1. Spusť **Kodi**
-2. V levém menu: **Doplňky** (ikona puzzle)
-3. Klikni na **ikonu krabice** (nahoře vlevo) → **Nainstalovat ze souboru ZIP**
-4. Najdi a vyber stažený soubor `plugin.video.klempcinema-0.0.137.zip`
-5. Počkej na hlášku **„Doplněk nainstalován"**
-
-#### Android TV / Android box
-
-1. ZIP zkopíruj na zařízení (USB, cloud, e-mail…)
-2. V Kodi: **Doplňky → Nainstalovat ze souboru ZIP**
-3. Projdí k ZIPu (např. `Download/` nebo `Internal storage/Download/`)
-4. Vyber ZIP a potvrď instalaci
-
-#### Aktualizace starší verze
-
-Pokud už máš starší KlempCinema (např. 0.0.84):
-
-1. **Doplňky → Moje doplňky → Videodoplňky → KlempCinema → Odinstalovat**
-2. **Restartuj Kodi** (úplně ukončit a znovu spustit)
-3. Nainstaluj nový ZIP podle kroku 2 výše
-
-> Přihlašovací údaje k Webshare zůstanou zachované (uložené v `userdata/addon_data`).
+- **Webshare** — login a heslo (dialog při prvním spuštění, nebo v Nastavení doplňku)
+- **TMDB API klíč** — Doplňky → KlempCinema → Nastavení → TMDB
 
 ---
 
-### 3. První spuštění — nastavení
-
-Po instalaci otevři **KlempCinema** v menu Doplňky. Při prvním spuštění:
-
-#### Webshare účet
-
-Doplněk zobrazí dialog pro zadání přihlašovacích údajů:
-
-- **Uživatelské jméno** — tvůj login na webshare.cz
-- **Heslo** — tvé heslo na webshare.cz
-
-Účet si musíš založit sám na [webshare.cz](https://webshare.cz). Doplněk žádný účet neposkytuje.
-
-Údaje lze kdykoli změnit v: **Doplňky → Moje doplňky → KlempCinema → Nastavení**
-
-#### TMDB API klíč (doporučeno)
-
-Bez TMDB klíče nebudou plakáty ani hodnocení filmů.
-
-1. Zaregistruj se na [themoviedb.org](https://www.themoviedb.org/signup)
-2. Jdi do **Nastavení → API** a vyžádej **API klíč** (typ: Developer / Personal)
-3. V Kodi: **Doplňky → Moje doplňky → KlempCinema → Nastavení → TMDB**
-4. Vlož API klíč a ulož
-
----
-
-### 4. Ověření, že vše funguje
+### Ověření, že vše funguje
 
 1. Otevři **KlempCinema** z menu Doplňky
 2. Zkus rubriku **Filmy** nebo **Novinky dabované**
