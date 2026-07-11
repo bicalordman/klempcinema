@@ -14,8 +14,8 @@ $xml = [xml](Get-Content (Join-Path $SrcRoot "addon.xml") -Raw -Encoding UTF8)
 $Version = $xml.addon.version
 $OutZip = Join-Path $Parent "$AddonId-$Version.zip"
 
-$ExcludeDir = @('__pycache__', '.git', '.cursor', 'tests')
-$ExcludeFile = @('*.zip', 'build_zip.ps1', 'run_tests.ps1', 'fanart_old.jpg', 'icon_old.png')
+$ExcludeDir = @('__pycache__', '.git', '.cursor', 'tests', 'docs', 'repository.klempcinema')
+$ExcludeFile = @('*.zip', 'build_zip.ps1', 'build_repo.ps1', 'run_tests.ps1', 'fanart_old.jpg', 'icon_old.png')
 
 if (Test-Path $OutZip) { Remove-Item $OutZip -Force }
 

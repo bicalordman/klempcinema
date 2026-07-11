@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="repository.klempcinema"
+       name="KlempCinema Repository"
+       version="1.0.0"
+       provider-name="Bicalorman">
+
+    <requires>
+        <import addon="xbmc.addon" version="12.0.0"/>
+    </requires>
+
+    <extension point="xbmc.addon.repository" name="KlempCinema Repo">
+        <dir>
+            <info compressed="false">https://bicalordman.github.io/klempcinema/repo/addons.xml</info>
+            <checksum>https://bicalordman.github.io/klempcinema/repo/addons.xml.md5</checksum>
+            <datadir zip="true">https://bicalordman.github.io/klempcinema/repo/</datadir>
+        </dir>
+    </extension>
+
+    <extension point="xbmc.addon.metadata">
+        <summary lang="cs_CZ">Oficialni repozitar doplnku KlempCinema</summary>
+        <summary lang="en_GB">Official KlempCinema add-on repository</summary>
+        <description lang="cs_CZ">Repozitar pro instalaci a automaticke aktualizace doplnku KlempCinema v Kodi. Po jednorazove instalaci tohoto repozitare najdes KlempCinema v Doplnky - Instalovat z repozitare.</description>
+        <description lang="en_GB">Repository for installing and automatically updating the KlempCinema Kodi add-on.</description>
+        <platform>all</platform>
+        <language>cs</language>
+        <license>GPL-3.0-or-later</license>
+        <source>https://github.com/bicalordman/klempcinema</source>
+        <assets>
+            <icon>icon.png</icon>
+        </assets>
+    </extension>
+</addon>

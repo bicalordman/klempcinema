@@ -21,7 +21,47 @@ Doplněk funguje bez reklam a bez sběru dat. Obsah se stahuje přímo z Webshar
 
 ---
 
-### 1. Stažení ZIP souboru
+### Instalace z repozitáře (doporučeno — aktualizace automaticky)
+
+Adresa repozitáře (po zapnutí GitHub Pages):
+
+**`https://bicalordman.github.io/klempcinema/repo/`**
+
+#### Jednorázové nastavení v Kodi
+
+1. **Nastavení** (ozubené kolo) → **Průzkumník souborů** → **Přidat zdroj**
+2. Do pole **„Síťové umístění protokolu"** vlož:
+   ```
+   https://bicalordman.github.io/klempcinema/repo/
+   ```
+3. **OK** → pojmenuj zdroj např. **KlempCinema Repo** → **OK**
+4. **Doplňky** → ikona krabice → **Nainstalovat ze souboru ZIP**
+5. **KlempCinema Repo** → `repository.klempcinema` → vyber  
+   **`repository.klempcinema-1.0.0.zip`**
+6. Počkej na hlášku **„Doplněk nainstalován"**
+7. **Doplňky → Nainstalovat z repozitáře → KlempCinema Repository → Video doplňky → KlempCinema → Instalovat**
+
+#### Aktualizace
+
+Kodi repozitář kontroluje sám. Nová verze se objeví v:
+
+**Doplňky → Moje doplňky → KlempCinema → Aktualizovat**
+
+(nebo hromadně přes **Doplňky → Moje doplňky → Aktualizovat vše**)
+
+> Kroky 1–6 nainstalují repozitář (stačí jednou). Krok 7 nainstaluje KlempCinema. Další verze přijdou přes **Aktualizovat** — bez ručního ZIPu.
+
+#### Zapnutí GitHub Pages (jednorázově, pro autora)
+
+1. Na GitHubu: **klempcinema → Settings → Pages**
+2. **Source:** Deploy from a branch → branch **main** → složka **/docs** → Save
+3. Po ~2 minutách ověř v prohlížeči:  
+   [bicalordman.github.io/klempcinema/repo/addons.xml](https://bicalordman.github.io/klempcinema/repo/addons.xml)
+4. Při nové verzi doplňku spusť `.\build_repo.ps1` a pushni změny v `docs/repo/` na GitHub
+
+---
+
+### Alternativa: instalace ze ZIP (ručně)
 
 1. Otevři stránku **Releases** na GitHubu:  
    [github.com/bicalordman/klempcinema/releases](https://github.com/bicalordman/klempcinema/releases)
@@ -32,7 +72,7 @@ Doplněk funguje bez reklam a bez sběru dat. Obsah se stahuje přímo z Webshar
 
 ---
 
-### 2. Instalace v Kodi
+### 2. Instalace ZIP v Kodi
 
 #### Windows / Linux / macOS
 
@@ -207,7 +247,8 @@ Zpráva:  Dar KlempCinema    (důležité - nech tam slovo „Dar")
 
 Autor: **Bicalorman**
 
-Pro hlášení chyb a návrhy — kontaktuj kanál odkud jsi doplněk získal.
+- **Chyby a návrhy:** [GitHub Issues](https://github.com/bicalordman/klempcinema/issues)
+- **Zdrojový kód:** [github.com/bicalordman/klempcinema](https://github.com/bicalordman/klempcinema)
 
 ---
 

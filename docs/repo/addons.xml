@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<addons>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
        version="0.0.137"
@@ -31,3 +32,4 @@
         </assets>
     </extension>
 </addon>
+</addons>
