@@ -6,6 +6,9 @@ __pycache__/
 
 # Build / distribuce (ZIP se generuje build_zip.ps1 do nadřazené složky)
 *.zip
+# Výjimka: Kodi repozitář na GitHub Pages MUSÍ obsahovat ZIP soubory
+!docs/repo/**/*.zip
+!repository.klempcinema/*.zip
 
 # Staré assety (do ZIPu se neberou)
 fanart_old.jpg
