@@ -24,6 +24,7 @@ from ..router_common import (
 
 log = logging.getLogger("klempcinema.views.menu")
 
+
 def view_root(handle: int, base_url: str) -> None:
     """
     Hlavni menu (v0.0.54: hierarchicke).
@@ -59,7 +60,6 @@ def view_root(handle: int, base_url: str) -> None:
             log.warning("Welcome setup selhal: %s", exc)
 
     addon = _addon()
-    icon = addon.getAddonInfo("icon")
     fanart = addon.getAddonInfo("fanart")
 
     # Pokracovat ve sledovani - vzdy nahore pokud je co
@@ -69,14 +69,14 @@ def view_root(handle: int, base_url: str) -> None:
         cont = []
     if cont:
         url = ui.build_url(base_url, action="continue_watching")
-        ui.add_dir_item(handle=handle, label=_tr(30080),
-                        url=url, icon=icon, fanart=fanart)
+        ui.add_dir_item(
+            handle=handle,
+            label=_tr(30080),
+            url=url,
+            icon=_addon_icon_for("menu/continue.png"),
+            fanart=fanart,
+        )
 
-    # v0.0.79: ZVYRAZNENI DARU - zlata barva + bold + srdicka + posun
-    # NA VRCH menu (pod Continue Watching). User vidi polozku ihned a nelze
-    # ji prehlednout. Drive byla na konci a snadno se prehledla.
-    # Vlastni ikona donate.png (zlaty darek s ruzovou stuhou na tmavem
-    # pozadi) - vynika v seznamu a okamzite identifikuje akci.
     donate_label = (
         "[B][COLOR FFFFD700]"
         "\u2665 Poslat autorovi dar (dobrovolne) \u2665"
@@ -84,102 +84,94 @@ def view_root(handle: int, base_url: str) -> None:
     )
     donate_icon = _addon_icon_for("donate.png")
 
+    def _mi(name: str) -> str:
+        return _addon_icon_for(f"menu/{name}.png")
+
+    # v0.0.149: pictogramy + CMenu (508) jako Sosáč — bez textovych znacek
     menu = [
-        # v0.0.79: Dobrovolny dar - zretelne na vrchu, zlate, bold, vlastni ikona
         (30220, "donate",          {}, donate_icon, donate_label),
-
-        # Hledat (high-visibility, akce ne folder)
-        (30004, "search",          {}, icon),
-
-        # Hierarchicke sekce - folders
-        (30002, "menu_movies",     {}, icon),                          # Filmy >
-        (30003, "menu_series",     {}, icon),                          # Serialy >
-        # v0.0.65: Streamovaci platformy (Netflix, HBO, Disney+, ...)
-        (30150, "menu_platforms",  {}, icon),                          # Platformy >
-        # v0.0.67: Voyo (SK) - reality, telenovely, niche obsah ktery TMDB
-        # nezná (typu Ruža pre nevestu). Zdroj voyo.markiza.sk SSR.
-        (30160, "menu_voyo",       {}, icon),                          # Voyo (SK) >
-        (30110, "menu_discover",   {}, icon),                          # Objevuj >
-        # v0.0.63: TV program dnes - co dnes hraje v ceske TV (zdroj iDNES)
-        (30140, "list_tv_program", {}, icon),                          # TV program dnes
-        (30300, "menu_concerts",     {}, icon),                          # Koncerty >
-        (30111, "menu_library",    {}, icon),                          # Knihovna >
-
-        # Nastroje
-        (30100, "tools",           {}, icon),                          # Nastroje >
+        (30004, "search",          {}, _mi("search")),
+        (30002, "menu_movies",     {}, _mi("movies")),
+        (30003, "menu_series",     {}, _mi("series")),
+        (30150, "menu_platforms",  {}, _mi("platforms")),
+        (30160, "menu_voyo",       {}, _mi("voyo")),
+        (30110, "menu_discover",   {}, _mi("discover")),
+        (30140, "list_tv_program", {}, _mi("tv")),
+        (30300, "menu_concerts",   {}, _mi("concerts")),
+        (30111, "menu_library",    {}, _mi("library")),
+        (30100, "tools",           {}, _mi("tools")),
     ]
     _render_menu(handle, base_url, menu)
 
 
 def view_menu_movies(handle: int, base_url: str) -> None:
     """Submenu Filmy - vsechny filmove rubriky."""
-    icon = _addon().getAddonInfo("icon")
+    def _mi(name: str) -> str:
+        return _addon_icon_for(f"menu/{name}.png")
+
     menu = [
-        (30002, "list_movies",          {"sort": "recent", "page": 1}, icon),
-        (30040, "list_movies_new_dub",  {"sort": "recent", "page": 1}, icon),
-        (30090, "list_4k",              {"sort": "recent", "page": 1},
-            _addon_icon_for("4k.png")),
-        (30091, "list_bluray",          {"sort": "recent", "page": 1},
-            _addon_icon_for("bluray.png")),
-        # v0.0.69: Animovane filmy CZ/SK - TMDB genre 16 filter
-        (30095, "list_animated",        {"sort": "recent", "page": 1}, icon),
-        (30324, "list_documentary",     {"sort": "recent", "page": 1}, icon),
-        (30042, "list_kids",            {"sort": "rating", "page": 1}, icon),
-        (30007, "list_latest",          {"sort": "recent", "page": 1}, icon),
+        (30002, "list_movies",          {"sort": "recent", "page": 1}, _mi("movies_all")),
+        (30040, "list_movies_new_dub",  {"sort": "recent", "page": 1}, _mi("movies_dub")),
+        (30090, "list_4k",              {"sort": "recent", "page": 1}, _addon_icon_for("4k.png")),
+        (30091, "list_bluray",          {"sort": "recent", "page": 1}, _addon_icon_for("bluray.png")),
+        (30095, "list_animated",        {"sort": "recent", "page": 1}, _mi("movies_animated")),
+        (30324, "list_documentary",     {"sort": "recent", "page": 1}, _mi("movies_docs")),
+        (30042, "list_kids",            {"sort": "rating", "page": 1}, _mi("movies_kids")),
+        (30007, "list_latest",          {"sort": "recent", "page": 1}, _mi("movies_latest")),
     ]
     _render_menu(handle, base_url, menu)
 
 
 def view_menu_series(handle: int, base_url: str) -> None:
     """Submenu Serialy."""
-    icon = _addon().getAddonInfo("icon")
+    def _mi(name: str) -> str:
+        return _addon_icon_for(f"menu/{name}.png")
+
     menu = [
-        (30003, "list_series",         {"sort": "rating", "page": 1}, icon),
-        (30041, "list_series_new_dub", {"sort": "recent", "page": 1}, icon),
+        (30003, "list_series",         {"sort": "rating", "page": 1}, _mi("series_all")),
+        (30041, "list_series_new_dub", {"sort": "recent", "page": 1}, _mi("series_dub")),
     ]
     _render_menu(handle, base_url, menu)
 
 
 def view_menu_discover(handle: int, base_url: str) -> None:
     """Submenu Objevuj (TMDB Discover)."""
-    icon = _addon().getAddonInfo("icon")
+    def _mi(name: str) -> str:
+        return _addon_icon_for(f"menu/{name}.png")
+
     menu = [
-        (30112, "trending_movies", {}, icon),   # Trending filmy
-        (30113, "trending_tv",     {}, icon),   # Trending serialy
-        (30082, "genres_movies",   {}, icon),   # Zanry filmu
-        (30083, "genres_tv",       {}, icon),   # Zanry serialu
+        (30112, "trending_movies", {}, _mi("trending_movies")),
+        (30113, "trending_tv",     {}, _mi("trending_tv")),
+        (30082, "genres_movies",   {}, _mi("genres_movies")),
+        (30083, "genres_tv",       {}, _mi("genres_tv")),
     ]
     _render_menu(handle, base_url, menu)
 
 
 def view_menu_library(handle: int, base_url: str) -> None:
     """Submenu Knihovna - vlastni soubory + historie."""
-    icon = _addon().getAddonInfo("icon")
+    def _mi(name: str) -> str:
+        return _addon_icon_for(f"menu/{name}.png")
+
     menu = [
-        (30080, "continue_watching", {}, icon),       # Pokracovat
-        (30009, "list_my_files",     {"page": 1}, icon),  # Moje soubory
-        (30004, "search",            {}, icon),       # Hledat (vc. historie)
+        (30080, "continue_watching", {}, _mi("continue")),
+        (30009, "list_my_files",     {"page": 1}, _mi("my_files")),
+        (30004, "search",            {}, _mi("search")),
     ]
     _render_menu(handle, base_url, menu)
 
 
 def view_tools(handle: int, base_url: str) -> None:
     """Submenu Nastroje - diagnostika a udrzba."""
-    icon = _addon().getAddonInfo("icon")
-    # v0.0.62: pridana volba "Test OpenSubtitles" pro overeni titulkove
-    # integrace (login + search). Stringy se nactou z language XML.
-    # v0.0.77: polozka "donate" presunuta z Nastroju do hlavniho menu
-    # (viditelnejsi pro uzivatele).
+    tools_icon = _addon_icon_for("menu/tools.png")
     menu = [
-        (30114, "open_settings",  {}, icon),     # Nastaveni pluginu (RunPluginSettings)
-        (30072, "test_login",     {}, icon),     # Test login Webshare
-        (30130, "test_subs",      {}, icon),     # Test OpenSubtitles (v0.0.62)
-        (30070, "clear_cache",    {}, icon),     # Smazat cache
-        (30101, "watched_clear",  {}, icon),     # Smazat historii sledovani
-        (30115, "search_history_clear", {}, icon),  # Smazat historii hledani
-        # v0.0.79: Manualni refresh Kodi texture cache (icon/fanart)
-        # pro pripady kdy auto-refresh po upgrade nestaci.
-        (30230, "refresh_icons",  {}, icon),     # Obnovit ikony pluginu
+        (30114, "open_settings",  {}, tools_icon),
+        (30072, "test_login",     {}, tools_icon),
+        (30130, "test_subs",      {}, tools_icon),
+        (30070, "clear_cache",    {}, tools_icon),
+        (30101, "watched_clear",  {}, tools_icon),
+        (30115, "search_history_clear", {}, tools_icon),
+        (30230, "refresh_icons",  {}, tools_icon),
     ]
     _render_menu(handle, base_url, menu)
 

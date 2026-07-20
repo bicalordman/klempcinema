@@ -25,7 +25,7 @@ def view_continue_watching(handle, base_url, params):
     items = watched_store.get_continue_watching(limit=50)
     if not items:
         ui.show_notification(_tr(30023))
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_directory(handle)
         return
 
     for it in items:
@@ -76,8 +76,7 @@ def view_continue_watching(handle, base_url, params):
         ui.add_video_item(handle, item_for_ui, url, is_folder=False,
                           extra_context_items=ctx)
 
-    xbmcplugin.setContent(handle, "movies")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="movies")
 
 
 def view_watched_forget(handle, base_url, params):

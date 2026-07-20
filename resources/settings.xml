@@ -103,6 +103,15 @@
                  lvalues="32134|32135|32136"
                  default="0"
                  enable="eq(-2,true)"/>
+        <setting id="tmdb_watch_region"
+                 type="enum"
+                 label="32181"
+                 lvalues="32182|32183"
+                 default="0"
+                 enable="eq(-3,true)"/>
+        <setting id="tmdb_watch_region_info"
+                 type="lsep"
+                 label="32184"/>
         <setting id="tmdb_info"
                  type="lsep"
                  label="32137"/>

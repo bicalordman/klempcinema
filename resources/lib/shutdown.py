@@ -113,11 +113,10 @@ def _watcher_loop() -> None:
         log.debug("shutdown: xbmc.Monitor unavailable (%s) - watcher off", exc)
         return
 
-    # Cekame jednotlive 1-sekundove sloty - pri abortu waitForAbort vrati
-    # True ihned a my muzeme oznamit shutdown.
+    # Cekame 0.5s sloty - rychlejsi detekce abortu (drive 1s).
     while True:
         try:
-            aborted = monitor.waitForAbort(1)
+            aborted = monitor.waitForAbort(0.5)
         except Exception:  # noqa: BLE001
             # Monitor uz neexistuje (interpreter unloading) - chovejme se
             # jako abort, at moduly dostanou pulse.

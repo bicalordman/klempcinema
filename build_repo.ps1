@@ -98,7 +98,41 @@ New-Item -ItemType Directory -Path (Join-Path $DocsRepo $RepositoryId) -Force | 
 
 Copy-Item $pluginZipTemp (Join-Path $DocsRepo "$PluginId\$pluginZipName") -Force
 Copy-Item $repoZipTemp (Join-Path $DocsRepo "$RepositoryId\$repoZipName") -Force
+Copy-Item $repoZipTemp (Join-Path $DocsRepo $repoZipName) -Force
 Copy-Item $pluginZipTemp (Join-Path $Parent $pluginZipName) -Force
+
+# Apache-style index.html — GitHub Pages neukazuje slozky, Kodi potrebuje odkazy
+$repoIndex = @"
+<!DOCTYPE HTML>
+<html>
+<head><meta charset="UTF-8"><title>Index of /repo/</title></head>
+<body>
+<h1>Index of /repo/</h1>
+<pre>
+<a href="addons.xml">addons.xml</a>
+<a href="addons.xml.md5">addons.xml.md5</a>
+<a href="$repoZipName">$repoZipName</a>
+<a href="$RepositoryId/">$RepositoryId/</a>
+<a href="$PluginId/">$PluginId/</a>
+</pre>
+</body>
+</html>
+"@
+[System.IO.File]::WriteAllText((Join-Path $DocsRepo "index.html"), $repoIndex, [System.Text.UTF8Encoding]::new($false))
+
+$repoSubIndex = @"
+<!DOCTYPE HTML>
+<html>
+<head><meta charset="UTF-8"><title>Index of /repo/$RepositoryId/</title></head>
+<body>
+<h1>Index of /repo/$RepositoryId/</h1>
+<pre>
+<a href="$repoZipName">$repoZipName</a>
+</pre>
+</body>
+</html>
+"@
+[System.IO.File]::WriteAllText((Join-Path $DocsRepo "$RepositoryId\index.html"), $repoSubIndex, [System.Text.UTF8Encoding]::new($false))
 
 # --- addons.xml (jen distributovatelne doplňky, ne samotny repository addon) ---
 $pluginBody = Get-AddonXmlBody (Join-Path $Root "addon.xml")
@@ -118,6 +152,12 @@ $md5 = (Get-FileHash -Path $addonsPath -Algorithm MD5).Hash.ToLower()
     $md5,
     [System.Text.UTF8Encoding]::new($false)
 )
+
+# GitHub Pages: vypnout Jekyll, jinak addons.xml nemusi fungovat
+$nojekyll = Join-Path (Split-Path $DocsRepo -Parent) ".nojekyll"
+if (-not (Test-Path $nojekyll)) {
+    [System.IO.File]::WriteAllText($nojekyll, "", [System.Text.UTF8Encoding]::new($false))
+}
 
 Write-Host ""
 Write-Host "OK: repozitar pripraven v docs\repo\"

@@ -314,8 +314,7 @@ def _render_movie_list(
     _add_next_page(handle, base_url, list_action, sort, page,
                    has_more=has_more, **next_extra)
 
-    xbmcplugin.setContent(handle, content)
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content=content)
 
 
 def _render_series_list(
@@ -369,8 +368,7 @@ def _render_series_list(
     _add_next_page(handle, base_url, list_action, sort, page,
                    has_more=has_more, **next_extra)
 
-    xbmcplugin.setContent(handle, "tvshows")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="tvshows")
 
 
 def _render_flat_list(
@@ -441,15 +439,23 @@ def _render_flat_list(
     _add_next_page(handle, base_url, list_action, sort, page,
                    has_more=has_more, **next_extra)
 
-    xbmcplugin.setContent(handle, content)
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content=content)
 
 def _addon_icon_for(name: str) -> str:
-    """Vrati cestu k custom ikone, fallback na default addon icon."""
+    """Vrati absolutni FS cestu k ikone (jako Sosáč get_icon)."""
     addon = _addon()
     path = addon.getAddonInfo("path")
-    candidate = os.path.join(path, "resources", "icons", name)
-    return candidate if os.path.exists(candidate) else addon.getAddonInfo("icon")
+    # Podporuj i podadresare (tv/hbo.png, menu/movies.png).
+    rel = str(name or "").replace("\\", "/").lstrip("/")
+    candidate = os.path.normpath(os.path.join(path, "resources", "icons", *rel.split("/")))
+    if not os.path.exists(candidate):
+        return addon.getAddonInfo("icon")
+    try:
+        import xbmcvfs  # type: ignore
+
+        return xbmcvfs.translatePath(candidate)
+    except Exception:  # noqa: BLE001
+        return candidate
 
 
 def _render_menu(handle: int, base_url: str, menu) -> None:
@@ -473,8 +479,7 @@ def _render_menu(handle: int, base_url: str, menu) -> None:
         url = ui.build_url(base_url, action=action, **params)
         ui.add_dir_item(handle=handle, label=label,
                         url=url, icon=item_icon or icon_default, fanart=fanart)
-    xbmcplugin.setContent(handle, "files")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_icon_menu(handle)
 
 
 # ---------------------------------------------------------------------------
@@ -833,8 +838,9 @@ def _render_with_search_top(handle, base_url, result, list_action: str,
     _add_next_page(handle, base_url, list_action, sort, page,
                    has_more=has_more, **extra)
 
-    xbmcplugin.setContent(handle, "movies")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="movies")
+
+
 def _clean_search_query(raw: str) -> str:
     """
     v0.0.62: vycisti user input z klavesnice pres clean_title.
@@ -945,5 +951,4 @@ def _render_episodes_flat(handle, base_url, name: str, season=None,
             time_ms=6000,
         )
 
-    xbmcplugin.setContent(handle, "episodes")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="episodes")

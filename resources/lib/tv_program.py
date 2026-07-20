@@ -109,6 +109,111 @@ _PREMIUM_CHANNEL_NAMES: frozenset = frozenset(
     label.strip().lower() for _, label in PREMIUM_CHANNEL_PAGES
 )
 
+# Ikony kanalu: resources/icons/tv/<file>.png
+# Klic = normalizovany nazev (bez diakritiky, lower).
+_CHANNEL_ICON_ALIASES: Dict[str, str] = {
+    # Ceske volnocasove
+    "ct1": "ct1.png", "ct 1": "ct1.png", "c t1": "ct1.png",
+    "ct2": "ct2.png", "ct 2": "ct2.png",
+    "ct24": "ct24.png", "ct 24": "ct24.png",
+    "ct sport": "ct-sport.png", "ct4": "ct-sport.png", "ct 4": "ct-sport.png",
+    "ct :d": "ct-d.png", "ct : d": "ct-d.png", "ct d": "ct-d.png", "ct:d": "ct-d.png",
+    "ct art": "ct-art.png",
+    "nova": "nova.png",
+    "nova cinema": "nova-cinema.png",
+    "nova action": "nova-action.png",
+    "nova fun": "nova-fun.png",
+    "nova gold": "nova-gold.png",
+    "nova sport 1": "nova-sport.png", "nova sport": "nova-sport.png",
+    "nova sport 2": "nova-sport-2.png",
+    "prima": "prima.png",
+    "prima cool": "prima-cool.png",
+    "prima krimi": "prima-krimi.png",
+    "prima max": "prima-max.png", "prima maxx": "prima-max.png",
+    "prima love": "prima-love.png",
+    "cnn prima news": "cnn-prima-news.png", "cnn prima": "cnn-prima-news.png",
+    "barrandov": "barrandov.png", "tv barrandov": "barrandov.png",
+    "joj": "joj.png", "tv joj": "joj.png",
+    "markiza": "markiza.png", "tv markiza": "markiza.png",
+    # Premium / tematicke (PREMIUM_CHANNEL_PAGES)
+    "hbo": "hbo.png",
+    "hbo 2": "hbo-2.png", "hbo2": "hbo-2.png",
+    "hbo 3": "hbo3.png", "hbo3": "hbo3.png",
+    "cinemax": "cinemax.png",
+    "cinemax 2": "cinemax2.png", "cinemax2": "cinemax2.png",
+    "history channel": "history-channel-hd.png", "history": "history-channel-hd.png",
+    "amc": "amc.png",
+    "warner tv": "warner-tv.png", "warner": "warner-tv.png",
+    "cs film": "cs-film.png", "csfilm": "cs-film.png",
+    "filmbox": "filmbox.png",
+    "filmbox family": "filmbox-family.png",
+    "animal planet": "animal-planet.png",
+    "national geographic": "national-geographic.png", "nat geo": "national-geographic.png",
+    "nat geo wild": "nat-geo-wild.png", "national geographic wild": "nat-geo-wild.png",
+    "spektrum": "spektrum.png",
+    "travel channel": "travel-channel.png", "travel": "travel-channel.png",
+    "viasat explorer": "viasat-explorer.png",
+    "oneplay sport 1": "oneplaysport-1.png",
+    "oneplay sport 2": "oneplaysport-2.png",
+}
+
+# slug z PREMIUM_CHANNEL_PAGES -> icon file
+_PREMIUM_ICON_BY_SLUG: Dict[str, str] = {
+    slug: f"{slug}.png" for slug, _ in PREMIUM_CHANNEL_PAGES
+}
+
+
+def _strip_diacritics(text: str) -> str:
+    table = str.maketrans({
+        "á": "a", "ä": "a", "č": "c", "ď": "d", "é": "e", "ě": "e",
+        "í": "i", "ĺ": "l", "ľ": "l", "ň": "n", "ó": "o", "ô": "o",
+        "ö": "o", "ř": "r", "š": "s", "ť": "t", "ú": "u", "ů": "u",
+        "ü": "u", "ý": "y", "ž": "z",
+        "Á": "a", "Ä": "a", "Č": "c", "Ď": "d", "É": "e", "Ě": "e",
+        "Í": "i", "Ĺ": "l", "Ľ": "l", "Ň": "n", "Ó": "o", "Ô": "o",
+        "Ö": "o", "Ř": "r", "Š": "s", "Ť": "t", "Ú": "u", "Ů": "u",
+        "Ü": "u", "Ý": "y", "Ž": "z",
+    })
+    return (text or "").translate(table)
+
+
+def _normalize_channel_key(name: str) -> str:
+    s = _strip_diacritics(name).lower().strip()
+    s = s.replace(":", " ").replace("+", " plus ").replace("&", " and ")
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def channel_icon_relpath(channel_name: str = "",
+                         channel_id: str = "") -> Optional[str]:
+    """Vrati relativni cestu icons/tv/<file>.png nebo None.
+
+    Pouziti: _addon_icon_for(channel_icon_relpath(...))
+    """
+    cid = str(channel_id or "").strip()
+    if cid.startswith("x:"):
+        slug = cid[2:].strip().lower()
+        fname = _PREMIUM_ICON_BY_SLUG.get(slug) or f"{slug}.png"
+        return f"tv/{fname}"
+
+    key = _normalize_channel_key(channel_name)
+    if not key:
+        return None
+
+    fname = _CHANNEL_ICON_ALIASES.get(key)
+    if fname:
+        return f"tv/{fname}"
+
+    # Prima MAX / HBO Max style – zkus bez mezer
+    compact = key.replace(" ", "")
+    for alias, icon in _CHANNEL_ICON_ALIASES.items():
+        if alias.replace(" ", "") == compact:
+            return f"tv/{icon}"
+
+    # heuristika: ct1 / nova-cinema z nazvu
+    slug = key.replace(" ", "-")
+    return f"tv/{slug}.png"
+
 _bg_lock = threading.Lock()
 _bg_running = False
 _BG_LOCK_STALE_SEC = 20 * 60
@@ -525,8 +630,10 @@ def _fetch_extra_channel_items() -> List[Dict[str, Any]]:
 
     merged: List[Dict[str, Any]] = []
     workers = min(4, len(PREMIUM_CHANNEL_PAGES))
-    with ThreadPoolExecutor(max_workers=workers,
-                            thread_name_prefix="tvprog-extra") as pool:
+    # v0.0.152: shutdown(wait=False) — jinak Quit ceka na vsechny kanaly
+    pool = ThreadPoolExecutor(max_workers=workers,
+                              thread_name_prefix="tvprog-extra")
+    try:
         futs = {
             pool.submit(_fetch_single_extra_channel, slug, label): slug
             for slug, label in PREMIUM_CHANNEL_PAGES
@@ -536,11 +643,18 @@ def _fetch_extra_channel_items() -> List[Dict[str, Any]]:
                 break
             slug = futs[fut]
             try:
-                batch = fut.result()
+                batch = fut.result(timeout=0.5)
                 if batch:
                     merged.extend(batch)
             except Exception as exc:  # noqa: BLE001
                 log.debug("tv_program: extra %s selhal: %s", slug, exc)
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
+        except Exception:  # noqa: BLE001
+            pass
     log.info("tv_program: premium kanaly celkem %d polozek", len(merged))
     return merged
 
@@ -738,21 +852,45 @@ def _background_full_fetch(base_items: Optional[List[Dict[str, Any]]]) -> None:
 
 
 def get_premium_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
-    """Vrati [(channel_id, channel_name), ...] pro HBO/Cinemax/History/..."""
+    """Vrati [(channel_id, channel_name), ...] jen s dnesnim sledovatelnym obsahem.
+
+    Sport/zpravy/prazdne kanaly se nezobrazuji. Bez fallbacku na cely
+    PREMIUM_CHANNEL_PAGES seznam (drive ukazoval prazdne slozky HBO/Sport).
+    """
+    return _channels_with_watchable(force_refresh=force_refresh, premium=True)
+
+
+def get_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
+    """Vrati [(channel_id, channel_name), ...] s dnesnim sledovatelnym obsahem.
+
+    Jen filmy/serialy/dokumenty/porady (ne sport/zpravy). Prazdne stanice pryč.
+    """
+    return _channels_with_watchable(force_refresh=force_refresh, premium=False)
+
+
+def _channels_with_watchable(
+    force_refresh: bool = False,
+    premium: bool = False,
+) -> List[Tuple[str, str]]:
+    """Kanaly, ktere maji alespon 1 budouci watchable polozku."""
     items = fetch_today(force_refresh=force_refresh)
+    kinds = set(SCOPE_KINDS["all_watchable"])
     seen: Dict[str, str] = {}
     for it in items:
         cid = str(it.get("channel_id") or "")
-        if cid.startswith("x:"):
-            seen[cid] = it.get("channel") or cid
-    if seen:
-        return sorted(seen.items(), key=lambda x: x[1].lower())
-    return [(f"x:{slug}", label) for slug, label in PREMIUM_CHANNEL_PAGES]
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+        if not cid:
+            continue
+        is_prem = cid.startswith("x:")
+        if premium and not is_prem:
+            continue
+        if not premium and is_prem:
+            continue
+        if it.get("kind") not in kinds:
+            continue
+        if it.get("is_past"):
+            continue
+        seen[cid] = (it.get("channel") or cid).strip() or cid
+    return sorted(seen.items(), key=lambda x: (x[1] or "").lower())
 
 def fetch_today(force_refresh: bool = False,
                 blocking: bool = False) -> List[Dict[str, Any]]:
@@ -946,8 +1084,9 @@ def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
     try:
         from concurrent.futures import ThreadPoolExecutor, wait
         workers = min(4, max(1, len(enrichable)))
-        with ThreadPoolExecutor(max_workers=workers,
-                                thread_name_prefix="tvprog-tmdb") as pool:
+        pool = ThreadPoolExecutor(max_workers=workers,
+                                  thread_name_prefix="tvprog-tmdb")
+        try:
             if max_wait_sec is not None and max_wait_sec > 0:
                 futures = [pool.submit(_enrich_one, it) for it in enrichable]
                 pending = set(futures)
@@ -960,6 +1099,13 @@ def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
                              len(pending), len(futures))
             else:
                 list(pool.map(_enrich_one, enrichable))
+        finally:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
+            except Exception:  # noqa: BLE001
+                pass
     except Exception as exc:  # noqa: BLE001
         log.exception("tv_program enrich pool selhal: %s", exc)
         for it in enrichable:
@@ -1029,9 +1175,17 @@ def _enrich_with_csfd_fallback(items: List[Dict[str, Any]]) -> None:
     try:
         from concurrent.futures import ThreadPoolExecutor
         workers = min(4, max(1, len(need_csfd)))
-        with ThreadPoolExecutor(max_workers=workers,
-                                thread_name_prefix="tvprog-csfd") as pool:
+        pool = ThreadPoolExecutor(max_workers=workers,
+                                  thread_name_prefix="tvprog-csfd")
+        try:
             list(pool.map(_one, need_csfd))
+        finally:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
+            except Exception:  # noqa: BLE001
+                pass
     except Exception as exc:  # noqa: BLE001
         log.exception("tv_program CSFD pool selhal: %s", exc)
         for it in need_csfd:
@@ -1148,12 +1302,3 @@ def get_channel_today(channel_id: str,
             out.append(it)
         out.sort(key=lambda x: x.get("start_min") or 0)
     return _dedupe_tv_items(out)
-
-
-def get_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
-    """Vrati [(channel_id, channel_name), ...] pro dnesni program,
-    serazeno podle priority.
-    """
-    items = fetch_today(force_refresh=force_refresh)
-    groups = group_by_channel(items)
-    return [(cid, name) for (cid, name, _items) in groups]

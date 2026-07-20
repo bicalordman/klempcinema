@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.137"
+       version="0.0.152"
        provider-name="Bicalorman">
 
     <requires>
@@ -24,7 +24,7 @@
         <source>https://github.com/bicalordman/klempcinema</source>
         <forum>https://github.com/bicalordman/klempcinema/issues</forum>
         <website>https://github.com/bicalordman/klempcinema</website>
-        <news>v0.0.137 Koncerty: kratsi rozpocet nacitani + prefetch dalsi stranky stihne dobehnout -> plynule listovani i za stranou 2.</news>
+        <news>v0.0.152 Rychlejsi Quit Kodi (neblokujici pooly + oprava image workeru).</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

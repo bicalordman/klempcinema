@@ -48,7 +48,7 @@ def view_clear_cache(handle, base_url, params):
                              else f"{msg} ({total})", time_ms=4000)
     except Exception:  # noqa: BLE001
         ui.show_notification(f"Cache cleared ({total} files)")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle)
 
 
 def view_test_login(handle, base_url, params):
@@ -135,7 +135,7 @@ def view_test_login(handle, base_url, params):
         ui.show_notification(f"Login: {result.get('code')} {result.get('message')}",
                              time_ms=10000)
 
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle)
 
 
 def view_subs_test(handle, base_url, params):
@@ -183,7 +183,7 @@ def view_subs_test(handle, base_url, params):
         xbmcgui.Dialog().textviewer("KlempCinema - OpenSubtitles test", text)
     except Exception:  # noqa: BLE001
         ui.show_notification(f"Subs: {result.get('message')}", time_ms=10000)
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle)
 
 
 def view_subs_download(handle, base_url, params):
@@ -300,7 +300,7 @@ def view_subs_download(handle, base_url, params):
             ui.show_notification(f"Titulky pro \"{title[:40]}\" nenalezeny",
                                   time_ms=5000)
 
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle)
 
 
 def view_refresh_metadata(handle, base_url, params):

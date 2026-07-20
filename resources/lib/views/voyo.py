@@ -166,8 +166,7 @@ def view_menu_voyo(handle, base_url, params):
         icon=icon, fanart=fanart,
     )
 
-    xbmcplugin.setContent(handle, "files")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="files")
 
 
 def view_voyo_section(handle, base_url, params):
@@ -205,8 +204,7 @@ def view_voyo_section(handle, base_url, params):
             label="[COLOR FFFFA500][B]>>> Otevrit Voyo SK v prohlizeci[/B][/COLOR]",
             url=browser_url, icon=icon, fanart=fanart,
         )
-        xbmcplugin.setContent(handle, "files")
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_directory(handle, content="files")
         return
 
     # "Vsechno" folder - flat dedupnuty list
@@ -234,8 +232,7 @@ def view_voyo_section(handle, base_url, params):
             url=cat_url, icon=icon, fanart=fanart,
         )
 
-    xbmcplugin.setContent(handle, "files")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="files")
 
 
 def view_voyo_category(handle, base_url, params):
@@ -263,8 +260,7 @@ def view_voyo_category(handle, base_url, params):
         ui.show_notification(
             f"Voyo: kategoria '{carousel}' je prazdna alebo cache miss",
             time_ms=5000)
-        xbmcplugin.setContent(handle, "movies")
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_directory(handle, content="movies")
         return
 
     # v0.0.88: Zobrazit cely katalog Voyo - WS overeni az po kliku
@@ -273,5 +269,4 @@ def view_voyo_category(handle, base_url, params):
         _render_voyo_tile(handle, base_url, tile, section)
 
     content_type = "tvshows" if section in ("serialy", "relacie") else "movies"
-    xbmcplugin.setContent(handle, content_type)
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content=content_type)

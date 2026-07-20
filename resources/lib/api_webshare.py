@@ -4180,9 +4180,16 @@ def get_kids(sort: str = "rating", page: int = 1) -> Tuple[List[Dict[str, Any]],
         ws_workers = min(5, len(slice_titles))
         results: List = []
         try:
-            with ThreadPoolExecutor(max_workers=ws_workers,
-                                    thread_name_prefix="kids-ws") as pool:
+            # v0.0.152: shutdown(wait=False) — Quit neceka na kids WS search
+            pool = ThreadPoolExecutor(max_workers=ws_workers,
+                                      thread_name_prefix="kids-ws")
+            try:
                 results = list(pool.map(_search_one_title, slice_titles))
+            finally:
+                try:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    pool.shutdown(wait=False)
         except Exception as exc:  # noqa: BLE001
             log.exception("kids paralel search selhal: %s", exc)
             results = [_search_one_title(t) for t in slice_titles]
@@ -5617,12 +5624,15 @@ def get_stream_url(
 # ---------------------------------------------------------------------------
 
 def get_seasons(series_id: str) -> List[Dict[str, Any]]:
-    """TODO: implementovat seznam sezón."""
-    log.debug("get_seasons(series_id=%s) – zatím neimplementováno.", series_id)
-    return []
+    """Tenký wrapper — seznam sezón přes get_series_seasons."""
+    if not series_id:
+        return []
+    info = get_series_seasons(series_id)
+    return list((info or {}).get("seasons") or [])
 
 
 def get_episodes(series_id: str, season: int) -> List[Dict[str, Any]]:
-    """TODO: implementovat seznam epizod."""
-    log.debug("get_episodes(series_id=%s, season=%s) – zatím neimplementováno.", series_id, season)
-    return []
+    """Tenký wrapper — epizody sezóny přes get_series_episodes."""
+    if not series_id:
+        return []
+    return get_series_episodes(series_id, season=season)

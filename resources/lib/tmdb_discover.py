@@ -292,7 +292,22 @@ def discover_tv(genre_id: int,
 
 # Region pro filtrovani dostupnosti. Vsechny platformy v PLATFORMS jsou
 # overene proti TMDB API (/watch/providers/movie?watch_region=CZ).
+# User muze v Nastaveni prepnout na SK (tmdb_watch_region).
 DEFAULT_REGION = "CZ"
+_REGION_OPTIONS = {"0": "CZ", "1": "SK"}
+
+# TMDB: flatrate = predplatne (Netflix/Disney+...), ne rental/buy.
+WATCH_MONETIZATION = "flatrate"
+
+
+def get_watch_region() -> str:
+    """ISO region pro with_watch_providers (CZ/SK) ze settings."""
+    try:
+        import xbmcaddon  # type: ignore
+        raw = (xbmcaddon.Addon().getSetting("tmdb_watch_region") or "0").strip()
+        return _REGION_OPTIONS.get(raw, DEFAULT_REGION)
+    except Exception:  # noqa: BLE001
+        return DEFAULT_REGION
 
 # v0.0.66: PLATFORMY OVERENE PROTI TMDB API
 #
@@ -370,7 +385,7 @@ def get_platform(provider_id: int) -> Optional[Dict[str, Any]]:
 def platform_movies(provider_id: int,
                     page: int = 1,
                     sort_by: str = "popularity.desc",
-                    region: str = DEFAULT_REGION,
+                    region: Optional[str] = None,
                     year_from: Optional[int] = None,
                     genre_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Filmy z TMDB Discover, dostupne na dane streaming platforme.
@@ -379,9 +394,11 @@ def platform_movies(provider_id: int,
     male/nise platformy (Crunchyroll, ceske) snizena na 5 - jinak by
     discover vracelo prazdno (anime/regionalni obsah ma mene hlasovani).
 
+    v0.0.138: flatrate only + region ze settings (CZ/SK) + zanry.
+
     :param provider_id: TMDB watch provider ID (8=Netflix, 337=Disney+, ...).
     :param sort_by: popularity.desc | vote_average.desc | primary_release_date.desc
-    :param region: ISO-3166-1 region kod (default 'CZ')
+    :param region: ISO-3166-1 region kod (None = ze settings)
     :param year_from: pokud zadany, filtruje filmy od tohoto roku
     :param genre_id: pokud zadany, druhy filtr by zanru (in-platform genre)
     """
@@ -391,19 +408,22 @@ def platform_movies(provider_id: int,
         pid = int(provider_id)
     except (ValueError, TypeError):
         return []
+    region = (region or get_watch_region() or DEFAULT_REGION).upper()
     platform = get_platform(pid)
     min_votes = int((platform or {}).get("min_votes_movie", 30))
+    # v3 = flatrate + region ze settings
     key = (f"tmdb_platform_movie:{pid}:{region}:{sort_by}:"
-           f"{year_from}:{genre_id}:{page}:v2")  # v2 = bumped pro min_votes
+           f"{year_from}:{genre_id}:{page}:v3")
     cached = cache.cache_get(key, ttl=DEFAULT_TTL)
     if cached is not None:
         return list(cached or [])
     params: Dict[str, Any] = {
-        "with_watch_providers": pid,
-        "watch_region":         region,
-        "sort_by":              sort_by,
-        "page":                 page,
-        "vote_count.gte":       min_votes,
+        "with_watch_providers":           pid,
+        "watch_region":                   region,
+        "with_watch_monetization_types":  WATCH_MONETIZATION,
+        "sort_by":                        sort_by,
+        "page":                           page,
+        "vote_count.gte":                 min_votes,
     }
     if year_from:
         params["primary_release_date.gte"] = f"{year_from}-01-01"
@@ -417,8 +437,10 @@ def platform_movies(provider_id: int,
     if not data:
         return []
     items = [_movie_to_meta(r) for r in (data.get("results") or [])]
-    log.info("platform_movies(pid=%s, sort=%s, min_votes=%d, page=%d) -> %d polozek",
-              pid, sort_by, min_votes, page, len(items))
+    log.info(
+        "platform_movies(pid=%s, region=%s, sort=%s, genre=%s, "
+        "min_votes=%d, page=%d) -> %d polozek",
+        pid, region, sort_by, genre_id, min_votes, page, len(items))
     cache.cache_set(key, items)
     return items
 
@@ -426,7 +448,7 @@ def platform_movies(provider_id: int,
 def platform_tv(provider_id: int,
                 page: int = 1,
                 sort_by: str = "popularity.desc",
-                region: str = DEFAULT_REGION,
+                region: Optional[str] = None,
                 genre_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Serialy dostupne na dane streaming platforme. Viz platform_movies."""
     if not _tmdb.is_enabled():
@@ -435,19 +457,21 @@ def platform_tv(provider_id: int,
         pid = int(provider_id)
     except (ValueError, TypeError):
         return []
+    region = (region or get_watch_region() or DEFAULT_REGION).upper()
     platform = get_platform(pid)
     min_votes = int((platform or {}).get("min_votes_tv", 20))
     key = (f"tmdb_platform_tv:{pid}:{region}:{sort_by}:"
-           f"{genre_id}:{page}:v2")  # v2 = bumped pro min_votes
+           f"{genre_id}:{page}:v3")
     cached = cache.cache_get(key, ttl=DEFAULT_TTL)
     if cached is not None:
         return list(cached or [])
     params: Dict[str, Any] = {
-        "with_watch_providers": pid,
-        "watch_region":         region,
-        "sort_by":              sort_by,
-        "page":                 page,
-        "vote_count.gte":       min_votes,
+        "with_watch_providers":           pid,
+        "watch_region":                   region,
+        "with_watch_monetization_types":  WATCH_MONETIZATION,
+        "sort_by":                        sort_by,
+        "page":                           page,
+        "vote_count.gte":                 min_votes,
     }
     if genre_id:
         params["with_genres"] = int(genre_id)
@@ -459,7 +483,9 @@ def platform_tv(provider_id: int,
     if not data:
         return []
     items = [_tv_to_meta(r) for r in (data.get("results") or [])]
-    log.info("platform_tv(pid=%s, sort=%s, min_votes=%d, page=%d) -> %d polozek",
-              pid, sort_by, min_votes, page, len(items))
+    log.info(
+        "platform_tv(pid=%s, region=%s, sort=%s, genre=%s, "
+        "min_votes=%d, page=%d) -> %d polozek",
+        pid, region, sort_by, genre_id, min_votes, page, len(items))
     cache.cache_set(key, items)
     return items

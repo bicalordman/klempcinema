@@ -42,7 +42,8 @@ MAX_TOTAL_BYTES = 200 * 1024 * 1024  # 200 MB
 # wait time. Pomalejsi zarizeni (Xbox One, RPi3) tezi nejvic.
 MAX_WORKERS = 2
 # v0.0.81: 2s timeout - plakaty jsou male, shutdown max wait 2s.
-DOWNLOAD_TIMEOUT = 2
+# v0.0.139: 2->1.5s - jeste kratsi hang pri Quit.
+DOWNLOAD_TIMEOUT = 1.0  # v0.0.152: max hang urlopen pri Quit
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -76,7 +77,7 @@ _PATH_CACHE_TTL_MISS = 5.0    # 5 sec - nemame, mozna se za chvili dotahne
 _MAX_PATH_CACHE = 500
 _MAX_QUEUE_PENDING = 40
 _MAX_IMAGE_BYTES = 4 * 1024 * 1024
-_WORKER_IDLE_SEC = 25
+_WORKER_IDLE_TICKS = 50  # ~25s pri queue.get(timeout=0.5)
 
 _plugin_exit = threading.Event()
 
@@ -126,6 +127,15 @@ _shutdown_event = threading.Event()
 def _on_global_shutdown() -> None:
     """v0.0.64: callback z shutdown.py watcheru - signaluj workerum exit."""
     _shutdown_event.set()
+    _plugin_exit.set()
+    with _pending_lock:
+        _pending_urls.clear()
+    if _download_queue is not None:
+        try:
+            while True:
+                _download_queue.get_nowait()
+        except Empty:
+            pass
     log.debug("image_cache: global shutdown signal received")
 
 
@@ -134,7 +144,12 @@ _shutdown.register(_on_global_shutdown)
 
 
 def on_plugin_exit() -> None:
-    """Ukonci image workery po kazde navigaci (perzistentni Python)."""
+    """Signalizuj image workerum konec; frontu vycisti.
+
+    v0.0.152: _plugin_exit zustane set az do _ensure_workers() —
+    drive se clear hned a workery nestihly skoncit + startovaly se
+    dalsi generace (vic urlopen pri Quit = dlouhe zavreni Kodi).
+    """
     _plugin_exit.set()
     with _pending_lock:
         _pending_urls.clear()
@@ -156,23 +171,6 @@ def on_plugin_exit() -> None:
     global _workers_started
     with _queue_lock:
         _workers_started = False
-    _plugin_exit.clear()
-
-
-try:
-    from . import lifecycle as _lifecycle
-    _lifecycle.register_plugin_exit(on_plugin_exit)
-except Exception:  # noqa: BLE001
-    pass
-
-
-def shutdown() -> None:
-    """Manual shutdown signal (back-compat). V Kodi se obvykle vola
-    automaticky pres shutdown.py - tato funkce je k dispozici jako
-    fallback / testing helper.
-    """
-    _shutdown_event.set()
-    log.debug("image_cache: shutdown signaled")
 
 
 def _ensure_workers() -> None:
@@ -181,6 +179,8 @@ def _ensure_workers() -> None:
     with _queue_lock:
         if _workers_started:
             return
+        # Nova navigace — povol worker loop (exit flag z predchozi)
+        _plugin_exit.clear()
         _download_queue = Queue()
         for i in range(MAX_WORKERS):
             t = threading.Thread(
@@ -191,6 +191,20 @@ def _ensure_workers() -> None:
             t.start()
         _workers_started = True
         log.debug("image_cache: spuštěno %d worker threadů", MAX_WORKERS)
+
+
+try:
+    from . import lifecycle as _lifecycle
+    _lifecycle.register_plugin_exit(on_plugin_exit)
+except Exception:  # noqa: BLE001
+    pass
+
+
+def shutdown() -> None:
+    """Manual shutdown signal (back-compat)."""
+    _shutdown_event.set()
+    _plugin_exit.set()
+    log.debug("image_cache: shutdown signaled")
 
 
 def _worker_loop() -> None:
@@ -209,11 +223,11 @@ def _worker_loop() -> None:
            and not _shutdown_event.is_set()
            and not _shutdown.is_shutting_down()):
         try:
-            url = _download_queue.get(timeout=1)
+            url = _download_queue.get(timeout=0.5)
             idle_ticks = 0
         except Empty:
             idle_ticks += 1
-            if idle_ticks >= _WORKER_IDLE_SEC:
+            if idle_ticks >= _WORKER_IDLE_TICKS:
                 break
             continue
         # Check zda nas Kodi nezavolal mezi get() a stahnutim
@@ -259,6 +273,8 @@ def _download_image(url: str) -> bool:
                 return False
             data = bytearray()
             while True:
+                if _shutdown_event.is_set() or _shutdown.is_shutting_down() or _plugin_exit.is_set():
+                    return False
                 chunk = resp.read(65536)
                 if not chunk:
                     break
@@ -454,21 +470,31 @@ def warm_urls(urls: List[str], max_workers: int = 4,
         return 0
     workers = min(max_workers, len(todo))
     done = 0
+    # v0.0.152: NEPOUZIVAT `with ThreadPoolExecutor` — jeho __exit__ dela
+    # shutdown(wait=True) a pri Quit blokuje az dobehnou urlopen().
+    pool = ThreadPoolExecutor(max_workers=workers)
     try:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_download_image, u) for u in todo]
-            _done, pending = wait(futures, timeout=total_timeout)
-            done = len(_done)
-            for fut in pending:
-                fut.cancel()
+        futures = [pool.submit(_download_image, u) for u in todo]
+        _done, pending = wait(futures, timeout=total_timeout)
+        done = len(_done)
+        for fut in pending:
+            fut.cancel()
     except Exception as exc:  # noqa: BLE001
         log.debug("image_cache.warm_urls selhalo: %s", exc)
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
+        except Exception:  # noqa: BLE001
+            pass
     if done:
         log.debug("image_cache.warm_urls: %d/%d stazeno", done, len(todo))
     return done
 
 
-def warm_items_posters(items: List[Dict[str, Any]], max_urls: int = 40) -> int:
+def warm_items_posters(items: List[Dict[str, Any]], max_urls: int = 40,
+                       total_timeout: float = 3.0) -> int:
     """Stahne plakaty/fanart pro seznam polozek (cross-rubric reuse)."""
     urls: List[str] = []
     for it in items:
@@ -476,7 +502,7 @@ def warm_items_posters(items: List[Dict[str, Any]], max_urls: int = 40) -> int:
             u = (it.get(field) or "").strip()
             if u:
                 urls.append(u)
-    return warm_urls(urls, max_urls=max_urls)
+    return warm_urls(urls, max_urls=max_urls, total_timeout=total_timeout)
 
 
 def stats() -> dict:

@@ -49,7 +49,7 @@ POSTER_SIZE = "w500"
 FANART_SIZE = "w1280"
 
 DEFAULT_LANG = "cs-CZ"
-TIMEOUT = 4  # v0.0.81: 4s - rychlejsi shutdown
+TIMEOUT = 3  # v0.0.139: 4->3s - rychlejsi shutdown (platformy/zanry)
 
 # Session-level "TMDB is broken" flag. Po MAX_FAILURES selháních
 # (401/403/network) přestaneme TMDB volat až do restartu pluginu -
@@ -187,6 +187,14 @@ def _http_get(path: str, **params: Any) -> Optional[Dict[str, Any]]:
         f"?{urlencode({k: v for k, v in params.items() if v not in (None, '')})}"
     )
     req = Request(url, headers=headers)
+
+    # v0.0.139: pri Kodi abortu nespoustet nove TMDB HTTP (platformy/zanry).
+    try:
+        from . import shutdown as _shutdown
+        if _shutdown.is_shutting_down():
+            return None
+    except Exception:  # noqa: BLE001
+        pass
 
     try:
         with urlopen(req, timeout=TIMEOUT) as resp:

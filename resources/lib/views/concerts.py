@@ -175,8 +175,7 @@ def view_search_concerts(handle, base_url, params):
             label=f"[COLOR FFFFA500][B]>>> {_tr(30316)}...[/B][/COLOR]",
             url=new_url, icon=icon, fanart=fanart,
         )
-        xbmcplugin.setContent(handle, "files")
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_directory(handle, content="files")
         return
 
     if not query and force_keyboard:

@@ -257,6 +257,18 @@ msgctxt "#30150"
 msgid "Streaming platforms"
 msgstr "Streamovaci platformy >"
 
+msgctxt "#30151"
+msgid "Movie genres"
+msgstr "Zanry filmu >"
+
+msgctxt "#30152"
+msgid "TV genres"
+msgstr "Zanry serialu >"
+
+msgctxt "#30153"
+msgid "Watch region: {region} (change in Settings → TMDB)"
+msgstr "Region katalogu: {region} (zmena v Nastaveni → TMDB)"
+
 msgctxt "#30160"
 msgid "Voyo SK shows"
 msgstr "Voyo (SK) - porady, serialy, filmy >"
@@ -571,6 +583,22 @@ msgstr "ČSFD se použije, když TMDB nic nenajde. POZOR: ČSFD má často aktiv
 msgctxt "#32180"
 msgid "Skip enrichment (very fast browsing, no posters/ratings)"
 msgstr "Vypnout obohacování (rychlé procházení, bez plakátů/hodnocení)"
+
+msgctxt "#32181"
+msgid "Streaming platforms: watch region"
+msgstr "Streamovací platformy: region katalogu"
+
+msgctxt "#32182"
+msgid "Czechia (CZ)"
+msgstr "Česko (CZ)"
+
+msgctxt "#32183"
+msgid "Slovakia (SK)"
+msgstr "Slovensko (SK)"
+
+msgctxt "#32184"
+msgid "Filters Netflix/Disney+/… catalogs by country availability (flatrate only)."
+msgstr "Filtruje katalogy Netflix/Disney+/… podle dostupnosti v zemi (jen předplatné, ne půjčovna)."
 
 # --- Řazení & filtrace ---
 

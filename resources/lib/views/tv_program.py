@@ -12,6 +12,7 @@ from .. import tv_program
 from .. import ui
 from ..router_common import (
     _addon,
+    _addon_icon_for,
     _ensure_login,
 )
 
@@ -25,6 +26,14 @@ _SCOPE_LABELS = {
     "all_watchable": "Vsechno dnes (filmy, serialy, porady, dokumenty)",
     "prime_films": "Filmy dnes vecer (od 18:00)",
 }
+
+
+def _channel_icon(cname: str = "", cid: str = "") -> str:
+    """Ikona kanalu (HBO, Nova, ...) nebo default addon icon."""
+    rel = tv_program.channel_icon_relpath(cname, cid)
+    if rel:
+        return _addon_icon_for(rel)
+    return _addon().getAddonInfo("icon")
 
 
 def _play_url_for_item(base_url: str, item: Dict[str, Any]) -> str:
@@ -164,15 +173,17 @@ def view_list_tv_program(handle, base_url, params):
         )
 
     addon = _addon()
-    icon = addon.getAddonInfo("icon")
     fanart = addon.getAddonInfo("fanart")
+
+    def _mi(name: str) -> str:
+        return _addon_icon_for(f"menu/{name}.png")
 
     refresh_url = ui.build_url(base_url, action="list_tv_program", refresh="1")
     ui.add_dir_item(
         handle=handle,
         label="[COLOR FF66CCFF][I]>>> Aktualizovat "
               "(stahnout cerstvy TV program)[/I][/COLOR]",
-        url=refresh_url, icon=icon, fanart=fanart,
+        url=refresh_url, icon=_mi("tv_refresh"), fanart=fanart,
     )
 
     if not items:
@@ -184,42 +195,41 @@ def view_list_tv_program(handle, base_url, params):
         ui.add_dir_item(
             handle=handle,
             label="[COLOR FFFFA500][B]>>> Otevrit TV program v prohlizeci[/B][/COLOR]",
-            url=browser_url, icon=icon, fanart=fanart,
+            url=browser_url, icon=_mi("tv"), fanart=fanart,
         )
-        xbmcplugin.setContent(handle, "files")
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_icon_menu(handle)
         return
 
     if not tv_program.is_full_cache_ready():
         if tv_program.is_background_fetch_running():
             bg_label = ("[COLOR FFFFA500][I]HBO, Cinemax, History... "
                         "se stahuji na pozadi (~1 min). "
-                        "Placeny kanal lze otevrit hned; obnov menu pro plny seznam.[/I][/COLOR]")
+                        "Obnov menu pro plny seznam stanic s obsahem.[/I][/COLOR]")
         else:
             bg_label = ("[COLOR FFFFA500][I]Placene kanaly jeste nejsou v cache. "
-                        "Klikni Aktualizovat nebo otevri konkretni kanal (HBO...).[/I][/COLOR]")
+                        "Klikni Aktualizovat — prazdne stanice (sport) se nezobrazi.[/I][/COLOR]")
         ui.add_dir_item(
             handle=handle, label=bg_label,
             url=ui.build_url(base_url, action="list_tv_program"),
-            icon=icon, fanart=fanart,
+            icon=_mi("tv"), fanart=fanart,
         )
 
     ui.add_dir_item(
         handle=handle,
-        label="[COLOR FF888888]--- Dnes v TV (CSFD styl) ---[/COLOR]",
+        label="[COLOR FF888888]--- Dnes v TV ---[/COLOR]",
         url=ui.build_url(base_url, action="list_tv_program"),
-        icon=icon, fanart=fanart,
+        icon=_mi("tv"), fanart=fanart,
     )
 
     sections = [
-        ("films",       "Filmy dnes"),
-        ("series",      "Serialy dnes"),
-        ("shows",       "Porady dnes"),
-        ("documentary", "Dokumenty dnes"),
-        ("all_watchable", "Vsechno dnes (chronologicky)"),
-        ("prime_films", "Filmy dnes vecer (od 18:00)"),
+        ("films",       "[B][COLOR FFE50914]F[/COLOR][/B]  Filmy dnes", "tv_films"),
+        ("series",      "[B][COLOR FF7B68EE]S[/COLOR][/B]  Serialy dnes", "tv_series"),
+        ("shows",       "[B][COLOR FFFFD700]\u25cf[/COLOR][/B]  Porady dnes", "tv_shows"),
+        ("documentary", "[B][COLOR FF8BC34A]D[/COLOR][/B]  Dokumenty dnes", "tv_docs"),
+        ("all_watchable", "[B][COLOR FF00C853]\u2605[/COLOR][/B]  Vsechno dnes (chronologicky)", "tv_all"),
+        ("prime_films", "[B][COLOR FFFF8C00]\u25a0[/COLOR][/B]  Filmy dnes vecer (od 18:00)", "tv_prime"),
     ]
-    for scope, label in sections:
+    for scope, label, icon_name in sections:
         if scope == "prime_films":
             n = len(tv_program.filter_today(
                 items, tv_program.SCOPE_KINDS["films"],
@@ -232,22 +242,24 @@ def view_list_tv_program(handle, base_url, params):
         ui.add_dir_item(
             handle=handle,
             label=f"[COLOR FFFFD700][B]{label}[/B][/COLOR]  ({n})",
-            url=sec_url, icon=icon, fanart=fanart,
+            url=sec_url, icon=_mi(icon_name), fanart=fanart,
         )
 
-    ui.add_dir_item(
-        handle=handle,
-        label="[COLOR FF888888]--- Podle kanalu ---[/COLOR]",
-        url=ui.build_url(base_url, action="list_tv_program"),
-        icon=icon, fanart=fanart,
-    )
-    for cid, cname in tv_program.get_channels():
-        folder_url = ui.build_url(base_url, action="tv_program_channel",
-                                   channel_id=cid)
+    free_channels = tv_program.get_channels()
+    if free_channels:
         ui.add_dir_item(
-            handle=handle, label=f"[B]{cname}[/B] - dnesni program",
-            url=folder_url, icon=icon, fanart=fanart,
+            handle=handle,
+            label="[COLOR FF888888]--- Podle kanalu ---[/COLOR]",
+            url=ui.build_url(base_url, action="list_tv_program"),
+            icon=_mi("tv"), fanart=fanart,
         )
+        for cid, cname in free_channels:
+            folder_url = ui.build_url(base_url, action="tv_program_channel",
+                                       channel_id=cid)
+            ui.add_dir_item(
+                handle=handle, label=f"[B]{cname}[/B]",
+                url=folder_url, icon=_channel_icon(cname, cid), fanart=fanart,
+            )
 
     premium = tv_program.get_premium_channels()
     if premium:
@@ -256,28 +268,27 @@ def view_list_tv_program(handle, base_url, params):
             label="[COLOR FF888888]--- Placene kanaly "
                   "(HBO, Cinemax, History...) ---[/COLOR]",
             url=ui.build_url(base_url, action="list_tv_program"),
-            icon=icon, fanart=fanart,
+            icon=_mi("tv"), fanart=fanart,
         )
         for cid, cname in premium:
             folder_url = ui.build_url(base_url, action="tv_program_channel",
                                        channel_id=cid)
             ui.add_dir_item(
                 handle=handle,
-                label=f"[COLOR FF66CCFF][B]{cname}[/B][/COLOR] - dnes",
-                url=folder_url, icon=icon, fanart=fanart,
+                label=f"[COLOR FF66CCFF][B]{cname}[/B][/COLOR]",
+                url=folder_url, icon=_channel_icon(cname, cid), fanart=fanart,
             )
 
     ui.add_dir_item(
         handle=handle,
-        label="[COLOR FF888888][I]Zdroj: tvprogram.idnes.cz (volnocasove + "
-              "HBO/Cinemax/History...) | Metadata: TMDB + CSFD | "
+        label="[COLOR FF888888][I]Zdroj: tvprogram.idnes.cz | "
+              "Jen stanice s filmy/serialy/porady dnes | "
               "Prehrani: Webshare[/I][/COLOR]",
         url=ui.build_url(base_url, action="list_tv_program"),
-        icon=icon, fanart=fanart,
+        icon=_mi("tv"), fanart=fanart,
     )
 
-    xbmcplugin.setContent(handle, "files")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_icon_menu(handle)
 
 
 def view_tv_program_scope(handle, base_url, params):
@@ -301,13 +312,11 @@ def view_tv_program_scope(handle, base_url, params):
     label = _SCOPE_LABELS.get(scope, scope)
     if not out:
         ui.show_notification(f"Zadne polozky: {label}", time_ms=5000)
-        xbmcplugin.setContent(handle, content)
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_directory(handle, content=content)
         return
 
     _render_tv_list(handle, base_url, out)
-    xbmcplugin.setContent(handle, content)
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content=content)
 
 
 def view_tv_program_films(handle, base_url, params):
@@ -323,8 +332,7 @@ def view_tv_program_films(handle, base_url, params):
             ui.show_notification("Zadne serialy/dokumenty dnes", time_ms=5000)
         else:
             _render_tv_list(handle, base_url, out)
-        xbmcplugin.setContent(handle, "tvshows")
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_directory(handle, content="tvshows")
         return
     new_params = dict(params)
     new_params["scope"] = "films" if scope == "all" else scope
@@ -346,10 +354,8 @@ def view_tv_program_channel(handle, base_url, params):
     if not items:
         ui.show_notification(
             "Kanal nema dnes dalsi sledovatelny obsah.", time_ms=5000)
-        xbmcplugin.setContent(handle, "videos")
-        xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+        ui.end_directory(handle, content="videos")
         return
 
     _render_tv_list(handle, base_url, items)
-    xbmcplugin.setContent(handle, "videos")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="videos")

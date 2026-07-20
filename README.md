@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.137**
+**Aktuální verze: 0.0.152**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.137.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.152.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -58,16 +58,17 @@ Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainst
 | Prázdné seznamy filmů | Zkontroluj Webshare přihlášení v Nastavení doplňku. |
 | Filmy bez plakátů | Zadej TMDB API klíč v Nastavení. |
 | Pomalé načítání | Normální při prvním otevření rubriky (~10 s). Druhé otevření je okamžité (cache). |
-| Kodi se pomalu vypíná | Aktualizuj na nejnovější verzi (0.0.133+). |
+| Kodi se pomalu vypíná | Aktualizuj na nejnovější verzi (0.0.152+). |
 
 ---
 
 ## Funkce
 
 - Procházení filmů a seriálů (Webshare + TMDB metadata, žánry v popisku)
-- Trending, žánry, streamovací platformy (Netflix/HBO/Disney+...)
+- Trending, žánry, streamovací platformy (Netflix/HBO/Disney+…, flatrate CZ/SK + žánry uvnitř)
+- Pictogramové ikony v menu (Seznam; volbu zobrazení Kodi pamatuje)
 - Seriály s rozdělením na sezóny a díly
-- TV program dnes (zdroj iDNES + TMDB plakáty)
+- TV program dnes (iDNES + loga kanálů, skrytí prázdných/sportovních)
 - Voyo (SK) pořady
 - Animované CZ/SK filmy
 - Pohádky CZ/SK
@@ -168,9 +169,51 @@ Autor: **Bicalorman**
 
 ## Změny
 
-Kompletní historie od poslední veřejné verze **0.0.84** po aktuální **0.0.137**.
+### Souhrn 0.0.137 → 0.0.152
 
-### Souhrn 0.0.84 → 0.0.137
+| Oblast | Hlavní změny |
+|--------|----------------|
+| Platformy | Jen předplatné (flatrate), region CZ/SK, žánry uvnitř platforem, loga Netflix/HBO/… |
+| Menu | Vlastní bílé pictogramy u rubrik; výchozí **Seznam**, po přepnutí Kodi volbu pamatuje |
+| TV program | Ikony kanálů (HBO, ČT, Nova…), skrytí prázdných a sportovních kanálů |
+| Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
+
+---
+
+### v0.0.152 — Rychlejší zavírání Kodi
+
+- Image cache a TV program: thread pooly už nečekají na doběhnutí HTTP při Quit
+- Oprava ukončení image workerů (neběžely paralelní generace stahování)
+
+### v0.0.151 — Seznam + paměť zobrazení
+
+- Výchozí pohled **Seznam**; po ručním přepnutí (Wall / široký seznam…) se volba uloží a nepřepisuje
+
+### v0.0.149–0.0.150 — Ikony menu
+
+- Pictogramové ikony rubrik (klapka, monitor, lupa… — vlastní design)
+- Jednotné ukončení adresářů přes `end_directory`
+
+### v0.0.141–0.0.142 — TV program kanály
+
+- Loga televizních kanálů; skrytí kanálů bez obsahu a sportovních
+
+### v0.0.140 — Oprava platforem
+
+- Oprava pádu při načítání seznamů platforem (`warm_items_posters`)
+
+### v0.0.138–0.0.139 — Platformy + rychlejší Quit
+
+- Discover platforem: `flatrate`, volba regionu CZ/SK, žánry uvnitř Netflix/HBO/…
+- Loga streamovacích služeb; kratší timeouty při vypínání Kodi
+
+### v0.0.137 — Plynulejší listování koncertů
+
+- Kratší časový rozpočet načítání + prefetch další stránky
+
+---
+
+### Starší historie (0.0.84 → 0.0.136)
 
 | Oblast | Hlavní změny |
 |--------|----------------|
@@ -184,11 +227,8 @@ Kompletní historie od poslední veřejné verze **0.0.84** po aktuální **0.0.
 | Výkon | Globální strop ~12 s, RAM cache, rychlé vypínání Kodi |
 | Nové rubriky | Dokumentární filmy CZ/SK (odděleně od koncertů) |
 
----
-
-### v0.0.137 — Plynulejší listování koncertů
-
-- Kratší časový rozpočet načítání + prefetch další stránky stihne doběhnout
+<details>
+<summary>Detailní changelog před 0.0.137</summary>
 
 ### v0.0.136 — Rychlejší vypínání Kodi + CZ koncerty
 
@@ -294,6 +334,8 @@ Kompletní historie od poslední veřejné verze **0.0.84** po aktuální **0.0.
 ### Starší verze (0.0.76–0.0.83)
 
 - Donate + welcome flow; rychlejší shutdown; jen tituly na Webshare; žánry v popisku; stabilní stránkování
+
+</details>
 
 ---
 

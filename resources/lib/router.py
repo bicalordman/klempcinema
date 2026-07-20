@@ -123,6 +123,8 @@ def _actions() -> Dict[str, Callable]:
         "platform":              d.view_platform,
         "platform_movies":       d.view_platform_movies,
         "platform_tv":           d.view_platform_tv,
+        "platform_genres_movies": d.view_platform_genres_movies,
+        "platform_genres_tv":    d.view_platform_genres_tv,
         "menu_voyo":             vy.view_menu_voyo,
         "voyo_section":          vy.view_voyo_section,
         "voyo_category":         vy.view_voyo_category,

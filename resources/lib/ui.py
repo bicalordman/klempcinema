@@ -103,14 +103,20 @@ def add_dir_item(
     fanart: Optional[str] = None,
     is_folder: bool = True,
 ) -> None:
-    """Přidá obyčejnou položku/složku (např. v hlavním menu)."""
+    """Přidá obyčejnou položku/složku (např. v hlavním menu).
+
+    v0.0.150: setArt(icon) + FS cesta; menu konci end_icon_menu()
+    se Sirokym seznamem (view 55).
+    """
     li = xbmcgui.ListItem(label=label)
     art: Dict[str, str] = {}
     if icon:
-        art["icon"] = icon
-        art["thumb"] = icon
+        icon_path = _kodi_art_path(icon)
+        # Sosáč nastavuje primárně 'icon' — CMenu bere ListItem.Icon
+        art["icon"] = icon_path
+        art["thumb"] = icon_path
     if fanart:
-        art["fanart"] = fanart
+        art["fanart"] = _kodi_art_path(fanart)
     if art:
         li.setArt(art)
 
@@ -120,6 +126,88 @@ def add_dir_item(
         listitem=li,
         isFolder=is_folder,
     )
+
+
+def _kodi_art_path(path: str) -> str:
+    """Cesta k artworku — preferuj absolutní FS cestu (jako Sosáč get_icon)."""
+    if not path:
+        return path
+    p = str(path)
+    if p.startswith("http://") or p.startswith("https://"):
+        return p
+    if p.startswith("special://"):
+        try:
+            import xbmcvfs  # type: ignore
+
+            return xbmcvfs.translatePath(p)
+        except Exception:  # noqa: BLE001
+            return p.replace("\\", "/")
+    # absolutní / relativní filesystem
+    try:
+        import xbmcvfs  # type: ignore
+
+        return xbmcvfs.translatePath(p)
+    except Exception:  # noqa: BLE001
+        return p.replace("\\", "/")
+
+
+def _seed_list_view_once(content: Optional[str]) -> Optional[int]:
+    """Jednou nastav Seznam (50) pro dany content; pak uz nech uzivatele.
+
+    Kodi si view pamatuje per content. Kdyz bychom volali SetViewMode porad,
+    prepsalo by to rucni volbu. Seed jen pri prvnim otevreni kazdeho typu.
+    """
+    try:
+        addon = xbmcaddon.Addon()
+        key = (content or "menu").strip().lower() or "menu"
+        # Bezpecny klic do CSV settings
+        key = "".join(ch for ch in key if ch.isalnum() or ch in ("_", "-"))[:32] or "menu"
+        raw = addon.getSetting("views_seeded_list") or ""
+        seeded = {x for x in raw.split(",") if x}
+        if key in seeded:
+            return None
+        seeded.add(key)
+        # Limit delky settings hodnoty
+        ordered = sorted(seeded)[-40:]
+        addon.setSetting("views_seeded_list", ",".join(ordered))
+        return 50  # Seznam / List
+    except Exception:  # noqa: BLE001
+        return 50
+
+
+def end_directory(
+    handle: int,
+    *,
+    succeeded: bool = True,
+    content: Optional[str] = None,
+    view_mode: Optional[int] = None,
+    cache_to_disc: bool = False,
+) -> None:
+    """Ukonci adresar.
+
+    Vychozi: Seznam (50) jednou per content, pak se pamatuje uzivatelska volba.
+    Explicitni view_mode vzdy vynuti dany rezim.
+    """
+    if succeeded and content:
+        try:
+            xbmcplugin.setContent(handle, content)
+        except Exception:  # noqa: BLE001
+            pass
+    if succeeded:
+        apply = view_mode if view_mode is not None else _seed_list_view_once(content)
+        if apply is not None:
+            try:
+                xbmc.executebuiltin(f"Container.SetViewMode({int(apply)})")
+            except Exception:  # noqa: BLE001
+                pass
+    xbmcplugin.endOfDirectory(
+        handle, succeeded=succeeded, cacheToDisc=cache_to_disc
+    )
+
+
+def end_icon_menu(handle: int, view_mode: Optional[int] = None) -> None:
+    """Ukonci menu — Seznam (50) jednou, pak pamatuj volbu uzivatele."""
+    end_directory(handle, view_mode=view_mode)
 
 
 def add_video_item(

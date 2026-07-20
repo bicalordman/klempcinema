@@ -397,8 +397,7 @@ def view_list_series_seasons(handle, base_url, params):
         }
         ui.add_video_item(handle, item, url, is_folder=True)
 
-    xbmcplugin.setContent(handle, "seasons")
-    xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+    ui.end_directory(handle, content="seasons")
 
 
 def view_list_series_episodes(handle, base_url, params):
@@ -535,8 +534,7 @@ def view_search(handle, base_url, params):
                 xbmcplugin.addDirectoryItem(handle=handle, url=url,
                                              listitem=li, isFolder=True)
 
-            xbmcplugin.setContent(handle, "files")
-            xbmcplugin.endOfDirectory(handle, succeeded=True, cacheToDisc=False)
+            ui.end_directory(handle, content="files")
             return
 
         # Bez historie - rovnou klavesnice
