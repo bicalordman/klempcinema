@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 import xbmc  # type: ignore
@@ -124,6 +125,7 @@ def view_tmdb_play_movie(handle, params):
     """
     title = (params.get("title") or "").strip()
     year_raw = (params.get("year") or "").strip()
+    original = (params.get("original") or "").strip()
     try:
         year = int(year_raw) if year_raw.isdigit() else None
     except ValueError:
@@ -137,12 +139,31 @@ def view_tmdb_play_movie(handle, params):
     _ensure_login()
 
     # 1) Search Webshare - zkusíme více variant query, abychom našli
-    #    co nejvíc match-ů (česká i originální verze názvu).
+    #    co nejvíc match-ů (česká i originální verze názvu + ASCII fold).
+    from .. import clean_title as _ct
+
     queries = [title]
+    folded = _ct.ascii_fold(title).strip()
+    if folded and folded.lower() != title.lower():
+        queries.append(folded)
+    if original and original.lower() not in {q.lower() for q in queries}:
+        queries.append(original)
+        ofold = _ct.ascii_fold(original).strip()
+        if ofold and ofold.lower() not in {q.lower() for q in queries}:
+            queries.append(ofold)
+    # Bez "The " prefix (The Matrix -> Matrix)
+    for q in list(queries):
+        no_the = re.sub(r"^the\s+", "", q, flags=re.I).strip()
+        if no_the and no_the.lower() not in {x.lower() for x in queries}:
+            queries.append(no_the)
     # Některé filmy mají v TMDB cs-CZ titulu jen česky, originál v en.
     # Pojďme zkusit i přidat rok do query - občas to pomůže.
     if year:
-        queries.append(f"{title} {year}")
+        base_qs = list(queries)
+        for q in base_qs:
+            yq = f"{q} {year}"
+            if yq.lower() not in {x.lower() for x in queries}:
+                queries.append(yq)
 
     all_files = []
     seen_idents = set()
@@ -163,22 +184,50 @@ def view_tmdb_play_movie(handle, params):
         return
 
     # 2) Vyloučit epizody seriálů (pro film je nechceme)
-    all_files = api_webshare._exclude_series(all_files)
-    if not all_files:
-        ui.show_notification(f"Webshare má jen epizody seriálu pro: {title}",
-                             time_ms=6000)
-        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
+    movie_files = api_webshare._exclude_series(all_files)
+    if not movie_files:
+        # TV guide obcas oznaci serial jako film - otevri sezonni rozcestnik.
+        ui.show_notification(
+            f"Na Webshare vypadá jako seriál: {title}",
+            time_ms=4000)
+        import sys
+        from .webshare_lists import view_list_series_seasons
+        view_list_series_seasons(handle, sys.argv[0], {"name": title})
         return
 
+    all_files = movie_files
+
     # 3) Match podle title + (volitelně) year
-    target_norm = api_webshare._norm_compare(title)
+    #    Loose norm: diakritika pryč, tecky/podtrzitka = mezery
+    #    (jinak "Pelíšky" nenajde "Pelisky.2009.mkv").
+    def _loose_norm(s: str) -> str:
+        s = _ct.ascii_fold(s or "")
+        s = re.sub(r"[._]+", " ", s.lower())
+        s = re.sub(r"^the\s+", "", s).strip()
+        return re.sub(r"\s+", " ", s).strip()
+
+    targets = [_loose_norm(title)]
+    if folded:
+        targets.append(_loose_norm(folded))
+    if original:
+        targets.append(_loose_norm(original))
+    targets = [t for t in targets if t]
+
     matching_year = []
     matching_only_title = []
     for f in all_files:
-        nm = api_webshare._norm_compare(f.get("name") or "")
-        if target_norm not in nm:
+        raw_name = f.get("name") or ""
+        nm = _loose_norm(raw_name)
+        cleaned = _ct.clean_title(raw_name) or raw_name
+        hit = any(t and t in nm for t in targets)
+        if not hit:
+            hit = any(
+                api_webshare._title_tokens_match(t, cleaned)
+                for t in (title, folded, original) if t
+            )
+        if not hit:
             continue
-        if year and str(year) in (f.get("name") or ""):
+        if year and str(year) in raw_name:
             matching_year.append(f)
         else:
             matching_only_title.append(f)

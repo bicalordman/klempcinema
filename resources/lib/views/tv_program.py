@@ -36,25 +36,47 @@ def _channel_icon(cname: str = "", cid: str = "") -> str:
     return _addon().getAddonInfo("icon")
 
 
+def _search_title_for_item(item: Dict[str, Any]) -> str:
+    """Nazev pro Webshare: preferuj TMDB/CSFD (casteji shodny s uploady)."""
+    return (
+        item.get("tmdb_title")
+        or item.get("csfd_title")
+        or item.get("title")
+        or ""
+    ).strip()
+
+
 def _play_url_for_item(base_url: str, item: Dict[str, Any]) -> str:
     """URL akce: Webshare hledani / sezony podle typu TV polozky."""
-    title = (item.get("title") or "").strip()
-    year = item.get("year") or item.get("tmdb_year")
+    title = _search_title_for_item(item)
+    # Preferuj TMDB rok (presnejsi nez rok z iDNES popisu).
+    year = item.get("tmdb_year") or item.get("year")
     kind = item.get("kind") or "other"
+    original = (item.get("tmdb_original") or "").strip()
 
     if kind == "film":
-        return ui.build_url(
-            base_url, action="tmdb_play_movie",
-            title=title, year=str(year) if year else "",
-        )
+        kwargs = {
+            "action": "tmdb_play_movie",
+            "title": title,
+            "year": str(year) if year else "",
+        }
+        if original and original.lower() != title.lower():
+            kwargs["original"] = original
+        if item.get("tmdb_id"):
+            kwargs["tmdb_id"] = str(item["tmdb_id"])
+        return ui.build_url(base_url, **kwargs)
     if kind in ("series", "documentary", "entertainment"):
         return ui.build_url(
             base_url, action="list_series_seasons", name=title,
         )
-    return ui.build_url(
-        base_url, action="tmdb_play_movie",
-        title=title, year=str(year) if year else "",
-    )
+    kwargs = {
+        "action": "tmdb_play_movie",
+        "title": title,
+        "year": str(year) if year else "",
+    }
+    if original and original.lower() != title.lower():
+        kwargs["original"] = original
+    return ui.build_url(base_url, **kwargs)
 
 
 def _render_tv_item(handle: int, base_url: str, item: Dict[str, Any],
@@ -85,12 +107,17 @@ def _render_tv_item(handle: int, base_url: str, item: Dict[str, Any],
     ).strip()
     if tmdb_year and not year:
         year = int(tmdb_year)
+    # Preferuj TMDB/CSFD plakat; iDNES nahled jen jako nouzovy fallback.
     poster_final = tmdb_poster or item.get("csfd_poster") or thumb
     fanart_final = tmdb_fanart or ""
 
     parts: List[str] = []
+    country = (item.get("country") or "").strip().lower()
     if show_channel_in_label and channel:
-        parts.append(f"[B]{channel}[/B]")
+        if country == "sk":
+            parts.append(f"[COLOR FF66CCFF][B]SK {channel}[/B][/COLOR]")
+        else:
+            parts.append(f"[B]{channel}[/B]")
     if airtime:
         parts.append(f"[COLOR FFFFA500]{airtime}[/COLOR]")
 
@@ -146,7 +173,9 @@ def _render_tv_item(handle: int, base_url: str, item: Dict[str, Any],
         "type":   ui_type,
         "dubbed": False,
     }
-    ui.add_video_item(handle, item_for_ui, play_url, is_folder=False,
+    # Serialy/porady -> sezony/epizody (slozka). Filmy -> primo play picker.
+    is_folder = kind in ("series", "documentary", "entertainment")
+    ui.add_video_item(handle, item_for_ui, play_url, is_folder=is_folder,
                        label_override=label)
 
 
@@ -249,7 +278,7 @@ def view_list_tv_program(handle, base_url, params):
     if free_channels:
         ui.add_dir_item(
             handle=handle,
-            label="[COLOR FF888888]--- Podle kanalu ---[/COLOR]",
+            label="[COLOR FF888888]--- Podle kanalu (CZ) ---[/COLOR]",
             url=ui.build_url(base_url, action="list_tv_program"),
             icon=_mi("tv"), fanart=fanart,
         )
@@ -260,6 +289,31 @@ def view_list_tv_program(handle, base_url, params):
                 handle=handle, label=f"[B]{cname}[/B]",
                 url=folder_url, icon=_channel_icon(cname, cid), fanart=fanart,
             )
+
+    sk_channels = tv_program.get_sk_channels()
+    if sk_channels:
+        ui.add_dir_item(
+            handle=handle,
+            label="[COLOR FF888888]--- Slovensko (SK) ---[/COLOR]",
+            url=ui.build_url(base_url, action="list_tv_program"),
+            icon=_mi("tv"), fanart=fanart,
+        )
+        for cid, cname in sk_channels:
+            folder_url = ui.build_url(base_url, action="tv_program_channel",
+                                       channel_id=cid)
+            ui.add_dir_item(
+                handle=handle,
+                label=f"[COLOR FF66CCFF][B]{cname}[/B][/COLOR]",
+                url=folder_url, icon=_channel_icon(cname, cid), fanart=fanart,
+            )
+    elif not tv_program.is_full_cache_ready():
+        ui.add_dir_item(
+            handle=handle,
+            label="[COLOR FFFFA500][I]Slovenske kanaly se nacitaji na pozadi… "
+                  "obnov menu za chvili.[/I][/COLOR]",
+            url=ui.build_url(base_url, action="list_tv_program"),
+            icon=_mi("tv"), fanart=fanart,
+        )
 
     premium = tv_program.get_premium_channels()
     if premium:
@@ -281,9 +335,8 @@ def view_list_tv_program(handle, base_url, params):
 
     ui.add_dir_item(
         handle=handle,
-        label="[COLOR FF888888][I]Zdroj: tvprogram.idnes.cz | "
-              "Jen stanice s filmy/serialy/porady dnes | "
-              "Prehrani: Webshare[/I][/COLOR]",
+        label="[COLOR FF888888][I]Zdroj: tvprogram.idnes.cz + webtv.sk | "
+              "Plakaty: TMDB/CSFD | Prehrani: Webshare[/I][/COLOR]",
         url=ui.build_url(base_url, action="list_tv_program"),
         icon=_mi("tv"), fanart=fanart,
     )

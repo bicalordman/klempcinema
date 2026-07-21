@@ -70,8 +70,8 @@ TV_URL = "https://tvprogram.idnes.cz/"
 TV_CACHE_TTL = 2 * 3600
 
 # Cache klic bumpujem pri zmene parseru / struktury.
-TV_CACHE_KEY = "tv_program:idnes:v3"
-TV_CACHE_KEY_BASE = "tv_program:idnes:base:v1"
+TV_CACHE_KEY = "tv_program:idnes:v4"
+TV_CACHE_KEY_BASE = "tv_program:idnes:base:v2"
 
 # Negativni cache (CF block / network down) - 10 min, neexpiruje rubric
 # moc rychle ale i tak nas chrani pred network spamem.
@@ -750,16 +750,24 @@ def _release_bg_process_lock() -> None:
 
 def _build_full_program(base_items: List[Dict[str, Any]],
                         *, bg_mode: bool = False) -> List[Dict[str, Any]]:
-    """Slouci zaklad + premium kanaly + TMDB enrich."""
+    """Slouci zaklad + premium kanaly + SK + TMDB/CSFD enrich."""
     items = _strip_premium_channels_from_base(base_items)
     items.extend(_fetch_extra_channel_items())
+    try:
+        from . import tv_program_sk as _sk
+        sk_items = _sk.fetch_today_sk(force_refresh=False)
+        if sk_items:
+            items.extend(sk_items)
+            log.info("tv_program: pridano %d SK polozek", len(sk_items))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("tv_program: SK fetch selhal: %s", exc)
     items = _dedupe_tv_items(items)
     try:
         _enrich_with_tmdb_posters(
             items,
-            max_wait_sec=4.0 if bg_mode else None,
-            csfd_fallback=False,
-            max_items=45 if bg_mode else None,
+            max_wait_sec=6.0 if bg_mode else None,
+            csfd_fallback=True,
+            max_items=80 if bg_mode else None,
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("tv_program TMDB enrich selhal: %s", exc)
@@ -864,13 +872,22 @@ def get_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
     """Vrati [(channel_id, channel_name), ...] s dnesnim sledovatelnym obsahem.
 
     Jen filmy/serialy/dokumenty/porady (ne sport/zpravy). Prazdne stanice pryč.
+    Jen CZ (iDNES) — SK ma get_sk_channels().
     """
-    return _channels_with_watchable(force_refresh=force_refresh, premium=False)
+    return _channels_with_watchable(
+        force_refresh=force_refresh, premium=False, country="cz")
+
+
+def get_sk_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
+    """Slovenske stanice s dnesnim sledovatelnym obsahem."""
+    return _channels_with_watchable(
+        force_refresh=force_refresh, premium=False, country="sk")
 
 
 def _channels_with_watchable(
     force_refresh: bool = False,
     premium: bool = False,
+    country: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
     """Kanaly, ktere maji alespon 1 budouci watchable polozku."""
     items = fetch_today(force_refresh=force_refresh)
@@ -880,10 +897,15 @@ def _channels_with_watchable(
         cid = str(it.get("channel_id") or "")
         if not cid:
             continue
-        is_prem = cid.startswith("x:")
-        if premium and not is_prem:
+        is_sk = cid.startswith("sk:") or it.get("country") == "sk"
+        is_prem = (not is_sk) and cid.startswith("x:")
+        if premium and (is_sk or not is_prem):
             continue
         if not premium and is_prem:
+            continue
+        if country == "sk" and not is_sk:
+            continue
+        if country == "cz" and is_sk:
             continue
         if it.get("kind") not in kinds:
             continue
@@ -911,6 +933,8 @@ def fetch_today(force_refresh: bool = False,
         try:
             cache.cache_delete(TV_CACHE_KEY)
             cache.cache_delete(TV_CACHE_KEY_BASE)
+            from . import tv_program_sk as _sk
+            cache.cache_delete(_sk.CACHE_KEY)
         except Exception:  # noqa: BLE001
             pass
 
@@ -931,7 +955,7 @@ def fetch_today(force_refresh: bool = False,
                      len(base))
             if _tv_items_need_poster_enrich(base):
                 _enrich_with_tmdb_posters(
-                    base, max_wait_sec=4.0, csfd_fallback=False)
+                    base, max_wait_sec=5.0, csfd_fallback=True)
                 cache.cache_set(TV_CACHE_KEY_BASE, base)
             schedule_full_fetch(list(base))
             return _dedupe_tv_items(list(base))
@@ -951,11 +975,20 @@ def fetch_today(force_refresh: bool = False,
     if not base:
         return []
 
-    _enrich_with_tmdb_posters(base, max_wait_sec=5.0, csfd_fallback=False)
+    # SK z vlastni cache (pokud uz je) — jinak prijde s background fullem.
+    try:
+        from . import tv_program_sk as _sk
+        sk_cached = cache.cache_get(_sk.CACHE_KEY, ttl=_sk.CACHE_TTL)
+        if sk_cached:
+            base = list(base) + list(sk_cached)
+    except Exception:  # noqa: BLE001
+        pass
+
+    _enrich_with_tmdb_posters(base, max_wait_sec=6.0, csfd_fallback=True)
     _warm_tv_poster_cache(base)
     cache.cache_set(TV_CACHE_KEY_BASE, base)
     schedule_full_fetch(list(base))
-    log.info("tv_program: rychly fetch OK (%d polozek), premium na pozadi",
+    log.info("tv_program: rychly fetch OK (%d polozek), premium/SK na pozadi",
              len(base))
     return _dedupe_tv_items(base)
 
@@ -996,7 +1029,8 @@ def _tv_items_need_poster_enrich(items: List[Dict[str, Any]]) -> bool:
         1 for it in enrichable
         if it.get("tmdb_poster") or it.get("csfd_poster")
     )
-    return with_poster < len(enrichable) // 2
+    # Dopln kdyz chybi plakat u vic nez ~20 % (drive polovina = moc shovivave).
+    return with_poster < int(len(enrichable) * 0.8)
 
 
 def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
@@ -1038,7 +1072,11 @@ def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
     enrichable = _tv_enrichable_items(items)
 
     if max_items is not None and len(enrichable) > max_items:
-        enrichable.sort(key=lambda x: x.get("start_min") or 0)
+        # Preferuj polozky bez plakatu + blizsi casy.
+        enrichable.sort(key=lambda x: (
+            1 if (x.get("tmdb_poster") or x.get("csfd_poster")) else 0,
+            x.get("start_min") or 0,
+        ))
         enrichable = enrichable[:max_items]
 
     if not enrichable:
@@ -1054,10 +1092,16 @@ def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
         year = it.get("year")
         kind = it.get("kind")
         try:
-            if kind in ("series", "documentary", "entertainment"):
-                meta = _tmdb.search_tv(title)
-            else:
+            meta = None
+            if kind == "film":
                 meta = _tmdb.search_movie(title, year)
+            elif kind == "documentary":
+                # Dokumenty jsou casto v movie i tv katalogu.
+                meta = _tmdb.search_movie(title, year) or _tmdb.search_tv(title)
+            else:
+                meta = _tmdb.search_tv(title)
+                if not meta and kind == "entertainment":
+                    meta = _tmdb.search_movie(title, year)
             if not meta:
                 return
             poster = meta.get("poster") or ""
@@ -1067,14 +1111,21 @@ def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
             if fanart:
                 it["tmdb_fanart"] = fanart
             tmdb_year = meta.get("year")
-            if tmdb_year and not it.get("year"):
+            if tmdb_year:
                 it["tmdb_year"] = int(tmdb_year)
+                if not it.get("year"):
+                    it["year"] = int(tmdb_year)
             tmdb_plot = meta.get("plot") or ""
             if tmdb_plot:
                 it["tmdb_plot"] = tmdb_plot
             tmdb_title = meta.get("title") or ""
             if tmdb_title:
                 it["tmdb_title"] = tmdb_title
+            original = meta.get("original") or ""
+            if original:
+                it["tmdb_original"] = original
+            if meta.get("tmdb_id"):
+                it["tmdb_id"] = meta["tmdb_id"]
             tmdb_rating = meta.get("rating")
             if tmdb_rating:
                 it["tmdb_rating"] = float(tmdb_rating)
@@ -1135,7 +1186,7 @@ def _enrich_with_csfd_fallback(items: List[Dict[str, Any]]) -> None:
 
     need_csfd = [
         it for it in items
-        if not it.get("tmdb_poster") or not it.get("tmdb_rating")
+        if not it.get("tmdb_poster")
     ]
     if not need_csfd:
         return
@@ -1149,11 +1200,20 @@ def _enrich_with_csfd_fallback(items: List[Dict[str, Any]]) -> None:
         if not title:
             return
         kind = it.get("kind") or "film"
+        year = it.get("tmdb_year") or it.get("year")
         try:
-            if kind in ("series", "documentary", "entertainment"):
-                meta = _csfd.search_tv(title)
+            meta = None
+            if kind == "film":
+                meta = _csfd.search_movie(title, year)
+            elif kind == "documentary":
+                meta = (
+                    _csfd.search_movie(title, year)
+                    or _csfd.search_tv(title)
+                )
             else:
-                meta = _csfd.search_movie(title, it.get("year"))
+                meta = _csfd.search_tv(title)
+                if not meta:
+                    meta = _csfd.search_movie(title, year)
             if not meta:
                 return
             if meta.get("csfd_rating") is not None:
@@ -1169,6 +1229,11 @@ def _enrich_with_csfd_fallback(items: List[Dict[str, Any]]) -> None:
                 it["csfd_plot"] = meta["plot"]
             if meta.get("title") and not it.get("tmdb_title"):
                 it["csfd_title"] = meta["title"]
+            if meta.get("year") and not it.get("tmdb_year") and not it.get("year"):
+                try:
+                    it["year"] = int(meta["year"])
+                except (TypeError, ValueError):
+                    pass
         except Exception as exc:  # noqa: BLE001
             log.debug("tv_program CSFD enrich %r: %s", title, exc)
 

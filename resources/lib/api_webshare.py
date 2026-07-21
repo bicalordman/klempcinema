@@ -998,7 +998,7 @@ def _looks_obfuscated(title: str) -> bool:
     return obf_count >= max(2, (len(words) + 1) // 2)
 
 
-_TRAILING_NUM_RE = re.compile(r"^(.*?)\s+(\d{1,3})\s*$")
+_TRAILING_NUM_RE = re.compile(r"^(.*?)\s+(\d{1,4})\s*$")
 
 
 # Patterny pro detekci "ne-film" obsahu (prednasky, popisy v nazvu, atd.)
@@ -1646,22 +1646,51 @@ _EPISODE_EXTRA_TOKENS = frozenset({
     "markiza", "voyo", "tv", "skcz", "czsk", "hd",
 })
 
+# Predlozky v dlouhem CZ nazvu — umozni zkratku WS ("Ordinace" misto celeho nazvu)
+_CZ_TITLE_FILLER = frozenset({
+    "v", "ve", "z", "ze", "na", "do", "od", "po", "pro", "pri", "při",
+    "a", "i", "o", "u", "ke", "ku", "za", "nad", "pod", "pred", "před",
+})
+
 
 def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
     """Shoda pro epizody — Survivor SK tagy, ale ne spin-off (Bachelor in Paradise)."""
     if _series_title_match(requested, detected):
         return True
-    rt = _title_meaningful_tokens(requested)
-    dt = _title_meaningful_tokens(detected)
-    if not rt or not dt:
-        return False
-    # Voyo katalog (kratky nazev) + WS tag (Survivor -> Survivor Slovensko)
-    if rt.issubset(dt):
-        extra = dt - rt
-        if not extra:
-            return True
-        if len(extra) <= 2 and all(t in _EPISODE_EXTRA_TOKENS for t in extra):
-            return True
+
+    def _token_sets(a: str, b: str):
+        yield _title_meaningful_tokens(a), _title_meaningful_tokens(b)
+        fa, fb = _ct.ascii_fold(a), _ct.ascii_fold(b)
+        if fa != a or fb != b:
+            yield _title_meaningful_tokens(fa), _title_meaningful_tokens(fb)
+
+    for rt, dt in _token_sets(requested, detected):
+        if not rt or not dt:
+            continue
+        # Voyo katalog (kratky nazev) + WS tag (Survivor -> Survivor Slovensko)
+        if rt.issubset(dt):
+            extra = dt - rt
+            if not extra:
+                return True
+            if len(extra) <= 2 and all(t in _EPISODE_EXTRA_TOKENS for t in extra):
+                return True
+        # Dlouhy CZ TV nazev vs zkratka na WS ("Ordinace v růžové zahradě" -> "Ordinace")
+        # Jen kdyz v plnem nazvu je predlozka (v/na/...) — ne "Bachelor in Paradise"->"Bachelor".
+        if dt.issubset(rt) and len(dt) >= 1:
+            req_words = [
+                t for t in re.findall(r"\w+", (_ct.ascii_fold(requested) or "").lower())
+                if t and not _TITLE_YEAR_TOKEN_RE.match(t)
+                and not _TITLE_QUALITY_TOKEN_RE.match(t)
+            ]
+            first = req_words[0] if req_words else ""
+            extras = rt - dt
+            if (
+                first
+                and first in dt
+                and max(len(t) for t in dt) >= 5
+                and (extras & _CZ_TITLE_FILLER)
+            ):
+                return True
     # Preklep / diakritika (Ruza vs Ruža) — jen vysoka podobnost
     try:
         from .title_match import title_similarity
@@ -4414,7 +4443,7 @@ def _collect_episodes_files(series_name: str,
     if not series_name:
         return []
 
-    cache_key = f"episodes_files:v6:{_norm_compare(series_name)}"
+    cache_key = f"episodes_files:v7:{_norm_compare(series_name)}"
     if force_refresh:
         try:
             cache.cache_delete(cache_key)
@@ -4433,20 +4462,39 @@ def _collect_episodes_files(series_name: str,
 
     # Vytvoříme seznam queries k vyzkoušení:
     # 1) Plný název ("Stranger Things")
-    # 2) Bez "The" prefix ("The Witcher" -> "Witcher")
-    # 3) První dvě slova ("Star Wars Visions" -> "Star Wars")
-    # 4) První slovo (poslední pokus)
+    # 2) ASCII bez diakritiky ("Ordinace v růžové zahradě" -> "... ruzove ...")
+    # 3) Bez "The" prefix ("The Witcher" -> "Witcher")
+    # 4) První významné slovo / dvě slova (ne "Ordinace v")
     queries: List[str] = [series_name]
+
+    folded = _ct.ascii_fold(series_name).strip()
+    if folded and folded.lower() != series_name.lower():
+        queries.append(folded)
 
     no_the = re.sub(r"^the\s+", "", series_name, flags=re.I).strip()
     if no_the and no_the != series_name:
         queries.append(no_the)
 
-    words = re.split(r"\s+", series_name.strip())
+    words = [w for w in re.split(r"\s+", series_name.strip()) if w]
+    # Přeskoč krátké předložky jako druhé slovo ("Ordinace v" je slabý dotaz)
+    _WEAK_SECOND = frozenset({
+        "v", "ve", "z", "ze", "a", "i", "o", "u", "na", "do", "od", "po",
+        "the", "of", "and", "or", "a", "an",
+    })
     if len(words) >= 3:
-        queries.append(" ".join(words[:2]))
+        if words[1].lower() in _WEAK_SECOND:
+            # "Ordinace v růžové..." -> radši "Ordinace" než "Ordinace v"
+            pass
+        else:
+            two = " ".join(words[:2])
+            if two not in queries:
+                queries.append(two)
     if len(words) >= 2 and words[0] not in queries:
         queries.append(words[0])
+    if folded and folded != series_name:
+        fwords = [w for w in re.split(r"\s+", folded.strip()) if w]
+        if fwords and fwords[0] not in queries:
+            queries.append(fwords[0])
 
     # v0.0.68: dva sort modes per query
     # - rating: nejstaženější varianty (staré dily v hi-quality)
@@ -4531,18 +4579,21 @@ def _parse_se(name: str) -> Tuple[Optional[int], Optional[int]]:
 
 # v0.0.119: Voyo / reality uploady bez SxxEyy ("Ruza pre nevestu epizoda 1").
 # v0.0.120: SK "1. diel", "5 dil", cislo pred/po markerem.
+# v0.0.153: az 4 cifry — ceske telenovely (Ordinace dil 847).
 _ALT_EP_PATTERNS = (
-    re.compile(r"epizod[a]?[\W_]*(\d{1,2})", re.I),
-    re.compile(r"(\d{1,2})[\W_]*epizod[a]?", re.I),
-    re.compile(r"d[ií]l[\W_]*(\d{1,2})", re.I),
-    re.compile(r"(\d{1,2})[\W_.]*d[ií]l", re.I),
-    re.compile(r"diel[\W_]*(\d{1,2})", re.I),
-    re.compile(r"(\d{1,2})[\W_.]*diel", re.I),
-    re.compile(r"č[aá]st[\W_]*(\d{1,2})", re.I),
-    re.compile(r"(\d{1,2})[\W_.]*č[aá]st", re.I),
-    re.compile(r"cast[\W_]*(\d{1,2})", re.I),
-    re.compile(r"(\d{1,2})[\W_.]*cast", re.I),
+    re.compile(r"epizod[a]?[\W_]*(\d{1,4})", re.I),
+    re.compile(r"(\d{1,4})[\W_]*epizod[a]?", re.I),
+    re.compile(r"d[ií]l[\W_]*(\d{1,4})", re.I),
+    re.compile(r"(\d{1,4})[\W_.]*d[ií]l", re.I),
+    re.compile(r"diel[\W_]*(\d{1,4})", re.I),
+    re.compile(r"(\d{1,4})[\W_.]*diel", re.I),
+    re.compile(r"č[aá]st[\W_]*(\d{1,4})", re.I),
+    re.compile(r"(\d{1,4})[\W_.]*č[aá]st", re.I),
+    re.compile(r"cast[\W_]*(\d{1,4})", re.I),
+    re.compile(r"(\d{1,4})[\W_.]*cast", re.I),
 )
+
+_ALT_EP_MAX = 9999
 
 
 def _parse_episode_alt(
@@ -4560,7 +4611,10 @@ def _parse_episode_alt(
             ep = int(m.group(1))
         except (TypeError, ValueError):
             continue
-        if not (1 <= ep <= 99):
+        if not (1 <= ep <= _ALT_EP_MAX):
+            continue
+        # Rok v nazvu neni cislo dilu
+        if 1900 <= ep <= 2099:
             continue
         prefix = _ct.clean_title(name[:m.start()])
         if prefix and _series_title_match_for_episodes(series_name, prefix):
@@ -4573,7 +4627,12 @@ def _parse_episode_alt(
         except (TypeError, ValueError):
             return None, None
         prefix = m.group(1).strip()
-        if 1 <= ep <= 99 and _series_title_match_for_episodes(series_name, prefix):
+        # Trailing: az 4 cifry, ale ne rok (2024)
+        if (
+            1 <= ep <= _ALT_EP_MAX
+            and not (1900 <= ep <= 2099)
+            and _series_title_match_for_episodes(series_name, prefix)
+        ):
             return 1, ep
     return None, None
 

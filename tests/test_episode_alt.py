@@ -80,6 +80,32 @@ class TestEpisodeAltParse(unittest.TestCase):
         base = aws._episode_base_for_series("Game of Thrones", 1, 3, name)
         self.assertIn("S01E03", base)
 
+    def test_ordinace_abbrev_title_match(self):
+        series = "Ordinace v růžové zahradě"
+        self.assertTrue(aws._series_title_match_for_episodes(series, "Ordinace"))
+        self.assertTrue(aws._series_title_match_for_episodes(
+            series, "Ordinace.v.ruzove.zahrade"))
+
+    def test_ordinace_high_episode_number(self):
+        series = "Ordinace v růžové zahradě"
+        name = "Ordinace dil 847 CZ.mkv"
+        self.assertEqual(aws._parse_episode(name, series), (1, 847))
+
+    def test_ordinace_ascii_epizoda(self):
+        series = "Ordinace v růžové zahradě"
+        name = "Ordinace.v.ruzove.zahrade.epizoda.120.1080p.mkv"
+        self.assertEqual(aws._parse_episode(name, series), (1, 120))
+
+    def test_trailing_year_not_episode(self):
+        series = "Ordinace v růžové zahradě"
+        name = "Ordinace 2024.mkv"
+        self.assertEqual(aws._parse_episode(name, series), (None, None))
+
+    def test_abbrev_does_not_shorten_english_spinoff(self):
+        # Opačný směr než Bachelor->Paradise: dlouhý EN název nesmí spadnout na zkratku
+        self.assertFalse(aws._series_title_match_for_episodes(
+            "Bachelor in Paradise", "Bachelor"))
+
 
 if __name__ == "__main__":
     unittest.main()
