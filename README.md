@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.152**
+**Aktuální verze: 0.0.153**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.152.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.153.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -58,7 +58,7 @@ Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainst
 | Prázdné seznamy filmů | Zkontroluj Webshare přihlášení v Nastavení doplňku. |
 | Filmy bez plakátů | Zadej TMDB API klíč v Nastavení. |
 | Pomalé načítání | Normální při prvním otevření rubriky (~10 s). Druhé otevření je okamžité (cache). |
-| Kodi se pomalu vypíná | Aktualizuj na nejnovější verzi (0.0.152+). |
+| Kodi se pomalu vypíná | Aktualizuj na nejnovější verzi (0.0.153+). |
 
 ---
 
@@ -68,7 +68,7 @@ Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainst
 - Trending, žánry, streamovací platformy (Netflix/HBO/Disney+…, flatrate CZ/SK + žánry uvnitř)
 - Pictogramové ikony v menu (Seznam; volbu zobrazení Kodi pamatuje)
 - Seriály s rozdělením na sezóny a díly
-- TV program dnes (iDNES + loga kanálů, skrytí prázdných/sportovních)
+- TV program dnes (CZ iDNES + SK webtv.sk, loga kanálů, CSFD/TMDB plakáty)
 - Voyo (SK) pořady
 - Animované CZ/SK filmy
 - Pohádky CZ/SK
@@ -169,16 +169,22 @@ Autor: **Bicalorman**
 
 ## Změny
 
-### Souhrn 0.0.137 → 0.0.152
+### Souhrn 0.0.137 → 0.0.153
 
 | Oblast | Hlavní změny |
 |--------|----------------|
 | Platformy | Jen předplatné (flatrate), region CZ/SK, žánry uvnitř platforem, loga Netflix/HBO/… |
 | Menu | Vlastní bílé pictogramy u rubrik; výchozí **Seznam**, po přepnutí Kodi volbu pamatuje |
-| TV program | Ikony kanálů (HBO, ČT, Nova…), skrytí prázdných a sportovních kanálů |
+| TV program | Ikony kanálů, CSFD/TMDB plakáty, lepší Webshare match, slovenské stanice (webtv.sk) |
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.153 — TV program: plakáty, přehrávání, SK
+
+- CSFD fallback plakátů u TV programu (jako u filmů)
+- Lepší hledání na Webshare (ASCII, originální název, Ordinace / vysoká čísla dílů)
+- Slovenské TV stanice (Markíza, JOJ, Jednotka, Doma…) přes webtv.sk
 
 ### v0.0.152 — Rychlejší zavírání Kodi
 
