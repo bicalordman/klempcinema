@@ -349,13 +349,20 @@ def _render_series_list(
             or item.get("series_name")
             or ""
         ).strip()
+        original = (
+            item.get("original_title")
+            or item.get("original")
+            or ""
+        ).strip()
         item_id = (item.get("id") or "").strip()
         if sname:
             # Klik na seriál -> seznam sezón (S01/S02/...). Když nemáme
             # rozumný TMDB lookup, view_list_series_seasons fallback
             # na ploché epizody automaticky.
-            url = ui.build_url(base_url, action="list_series_seasons",
-                               name=sname)
+            kwargs = {"action": "list_series_seasons", "name": sname}
+            if original and original.lower() != sname.lower():
+                kwargs["original"] = original
+            url = ui.build_url(base_url, **kwargs)
             ui.add_video_item(handle, item, url, is_folder=True)
         elif item_id:
             # Single-file fallback (např. neidentifikovaná epizoda mimo grupy).
@@ -421,11 +428,21 @@ def _render_flat_list(
                                        year=_item_play_year(item))
         elif item.get("series_name"):
             # Seriál - otevři sezóny (použij zobrazený název, ne WS group name)
-            url = ui.build_url(
-                base_url,
-                action="list_series_seasons",
-                name=(item.get("title") or item.get("series_name")),
-            )
+            sname = (
+                item.get("title_localized")
+                or item.get("title")
+                or item.get("series_name")
+                or ""
+            ).strip()
+            original = (
+                item.get("original_title")
+                or item.get("original")
+                or ""
+            ).strip()
+            kwargs = {"action": "list_series_seasons", "name": sname}
+            if original and original.lower() != sname.lower():
+                kwargs["original"] = original
+            url = ui.build_url(base_url, **kwargs)
             ui.add_video_item(handle, item, url, is_folder=True)
             continue
         else:
@@ -746,7 +763,9 @@ def _render_with_search_top(handle, base_url, result, list_action: str,
                              search_label_id: int = 30092,
                              query: str = "",
                              search_year: Optional[int] = None,
-                             cz_only: bool = False):
+                             cz_only: bool = False,
+                             content: str = "movies",
+                             reset_label: str = ""):
     """
     Vykreslí seznam filmů s vyhledávacím polem JAKO PRVNÍ položkou (jen na page 1).
     Klik na "Hledat..." otevře klávesnici a pak filtruje obsah rubriky.
@@ -756,8 +775,14 @@ def _render_with_search_top(handle, base_url, result, list_action: str,
       rovnou refinovat dotaz bez navratu Back).
     - Pri aktivnim query a 0 vysledcich: zobrazi "Nic nenalezeno pro <q>"
       notifikaci PLUS "<<< Vsechny filmy" tlacitko pro reset.
+    v0.0.164: content/reset_label pro seriály.
     """
     items, has_more = _split_result(result)
+    is_series = (content or "").lower() in ("tvshows", "series", "tv")
+    reset_txt = reset_label or (
+        "<<< Vsechny serialy (zrusit filtr)" if is_series
+        else "<<< Vsechny filmy (zrusit filtr)"
+    )
 
     # První položka na page 1 - vyhledávací pole. v0.0.62: i kdyz uz query.
     if page == 1:
@@ -785,14 +810,29 @@ def _render_with_search_top(handle, base_url, result, list_action: str,
                                       sort=sort, page=1)
             ui.add_dir_item(
                 handle=handle,
-                label="[COLOR FF888888][I]<<< Vsechny filmy (zrusit filtr)[/I][/COLOR]",
+                label=f"[COLOR FF888888][I]{reset_txt}[/I][/COLOR]",
                 url=reset_url, icon=icon, fanart=fanart,
             )
 
     for item in items:
-        if item.get("series_name"):
-            url = ui.build_url(base_url, action="list_series_seasons",
-                               name=item["series_name"])
+        if item.get("series_name") or (
+            is_series and (item.get("title_localized") or item.get("title"))
+        ):
+            sname = (
+                item.get("title_localized")
+                or item.get("title")
+                or item.get("series_name")
+                or ""
+            ).strip()
+            original = (
+                item.get("original_title")
+                or item.get("original")
+                or ""
+            ).strip()
+            kwargs = {"action": "list_series_seasons", "name": sname}
+            if original and original.lower() != sname.lower():
+                kwargs["original"] = original
+            url = ui.build_url(base_url, **kwargs)
             ui.add_video_item(handle, item, url, is_folder=True)
         elif item.get("base_title"):
             url = _build_play_pick_url(base_url, item["base_title"],
@@ -813,7 +853,11 @@ def _render_with_search_top(handle, base_url, result, list_action: str,
                 import xbmcgui  # type: ignore
                 xbmcgui.Dialog().notification(
                     "KlempCinema",
-                    f"V teto rubrice nic - zkus 'Hledat ve vsech filmech'",
+                    (
+                        "V teto rubrice nic - zkus globalni Hledat"
+                        if is_series
+                        else "V teto rubrice nic - zkus 'Hledat ve vsech filmech'"
+                    ),
                     xbmcgui.NOTIFICATION_INFO, 5000,
                 )
             except Exception:  # noqa: BLE001
@@ -832,7 +876,7 @@ def _render_with_search_top(handle, base_url, result, list_action: str,
             ui.add_dir_item(
                 handle=handle,
                 label=(f"[COLOR FF00FF88][B]>>> Hledat '{query[:30]}' "
-                       f"ve VSECH filmech (mimo rubriku)...[/B][/COLOR]"),
+                       f"ve VSECH (mimo rubriku)...[/B][/COLOR]"),
                 url=fallback_url, icon=icon2, fanart=fanart2,
             )
         else:
@@ -846,7 +890,7 @@ def _render_with_search_top(handle, base_url, result, list_action: str,
     _add_next_page(handle, base_url, list_action, sort, page,
                    has_more=has_more, **extra)
 
-    ui.end_directory(handle, content="movies")
+    ui.end_directory(handle, content="tvshows" if is_series else "movies")
 
 
 def _clean_search_query(raw: str) -> str:
@@ -892,17 +936,32 @@ def _parse_user_search(raw: str):
     else:
         label = clean or raw
     return clean, year, label
+
+
 def _render_episodes_flat(handle, base_url, name: str, season=None,
-                           force_refresh: bool = False):
+                           force_refresh: bool = False,
+                           original: Optional[str] = None,
+                           ep_from: Optional[int] = None,
+                           ep_to: Optional[int] = None):
     """Vykreslí epizody (volitelně 1 sezóny) bez season folderingu.
 
     v0.0.68: pridana podpora force_refresh + Aktualizovat tlacitko nahore.
+    v0.0.164: original (EN) + ep_from/ep_to (continuous dily).
     """
-    log.info("_render_episodes_flat: name=%r season=%s refresh=%s",
-             name, season, force_refresh)
+    log.info("_render_episodes_flat: name=%r season=%s refresh=%s "
+             "original=%r ep=%s-%s",
+             name, season, force_refresh, original, ep_from, ep_to)
+    alt_names = None
+    if original and original.strip().lower() != (name or "").strip().lower():
+        alt_names = [original.strip()]
     try:
-        items = api_webshare.get_series_episodes(name, season=season,
-                                                  force_refresh=force_refresh)
+        items = api_webshare.get_series_episodes(
+            name, season=season,
+            force_refresh=force_refresh,
+            alt_names=alt_names,
+            ep_from=ep_from,
+            ep_to=ep_to,
+        )
     except Exception as exc:  # noqa: BLE001
         log.exception("get_series_episodes(%r, season=%s) selhalo: %s",
                       name, season, exc)
@@ -922,6 +981,12 @@ def _render_episodes_flat(handle, base_url, name: str, season=None,
                        "refresh": "1"}
     if season is not None:
         refresh_params["season"] = str(season)
+    if original:
+        refresh_params["original"] = original
+    if ep_from is not None:
+        refresh_params["ep_from"] = str(ep_from)
+    if ep_to is not None:
+        refresh_params["ep_to"] = str(ep_to)
     refresh_url = ui.build_url(base_url, **refresh_params)
     ui.add_dir_item(
         handle=handle,
@@ -940,22 +1005,20 @@ def _render_episodes_flat(handle, base_url, name: str, season=None,
         ui.add_video_item(handle, item, url, is_folder=False)
 
     if not items:
-        # v0.0.67: Pridan fallback button pro pripad, ze Webshare nema SxxEyy
-        # uploady (typicke pro niche reality TV s Voyo: nekdo uploadne "Ruza
-        # pre nevestu epizoda 1" bez SxxEyy markeru). Click na fallback ->
-        # tmdb_play_movie spusti Webshare full-text search nazvu a vyrobi
-        # quality picker s vsemi variantami. User aspon dostane neco.
-        fallback_url = ui.build_url(base_url, action="tmdb_play_movie",
-                                     title=name, year="")
+        # v0.0.164: seriálové znovuhledání (ne movie picker)
+        retry_kwargs = {"action": "list_series_seasons", "name": name, "refresh": "1"}
+        if original:
+            retry_kwargs["original"] = original
+        retry_url = ui.build_url(base_url, **retry_kwargs)
         ui.add_dir_item(
             handle=handle,
-            label=(f"[COLOR FFFFA500][B]>>> Hledat '{name[:50]}' na Webshare "
-                   "(bez epizodniho rozdeleni)[/B][/COLOR]"),
-            url=fallback_url, icon=icon, fanart=fanart,
+            label=(f"[COLOR FFFFA500][B]>>> Zkusit znovu nacist sezony "
+                   f"'{name[:40]}'[/B][/COLOR]"),
+            url=retry_url, icon=icon, fanart=fanart,
         )
         ui.show_notification(
             f"Zadne epizody pro '{name[:40]}' - "
-            "zkus fallback search nahore.",
+            "zkus Aktualizovat / znovu nacist sezony.",
             time_ms=6000,
         )
 

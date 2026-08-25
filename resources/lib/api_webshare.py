@@ -4626,9 +4626,39 @@ def get_kids(sort: str = "rating", page: int = 1,
                              sort_mode=sort_mode)
 
 
-def get_series(sort: str = "rating", page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
-    """Seriály – vrací (items, has_more)."""
-    log.debug("get_series(sort=%s, ui_page=%s)", sort, page)
+def get_series(
+    sort: str = "rating",
+    page: int = 1,
+    query_override: Optional[str] = None,
+    search_year: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Seriály – vrací (items, has_more).
+
+    v0.0.164: query_override = volne hledani v rubrice (jako u Filmu).
+    """
+    log.debug("get_series(sort=%s, ui_page=%s, override=%r)",
+              sort, page, query_override)
+    if query_override:
+        q = query_override.strip()
+        queries = _build_rubric_search_queries(
+            q, search_year,
+            extras=[f"{q} S01E01", f"{q} S01", f"{q} CZ", f"{q} dabing"],
+        )
+        cache_key = f"rubrika:series:search:v1:{q.lower()}:y{search_year or 0}"
+        return _paginate_multi_query(
+            cache_key=cache_key,
+            queries=queries,
+            ui_page=page,
+            pre_filter=None,
+            post_filter=None,
+            sort_key=lambda it: _search_sort_key(it, want_year=search_year, query=q),
+            max_ws_pages=10,
+            grouping="series",
+            search_query=q,
+            search_year=search_year,
+            trust_ws_query=True,
+        )
+
     query = _addon_query("q_series", DEFAULT_QUERIES["series"])
     sort_mode = _read_sort("sort_series", SORT_SERIES)
 
@@ -4640,9 +4670,41 @@ def get_series(sort: str = "rating", page: int = 1) -> Tuple[List[Dict[str, Any]
     return _paginate_rubrika(cache_key, _ws_fetch, ui_page=page, sort_mode=sort_mode)
 
 
-def get_series_new_dub(sort: str = "recent", page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
-    """Nově dabované seriály – vrací (items, has_more)."""
-    log.debug("get_series_new_dub(sort=%s, ui_page=%s)", sort, page)
+def get_series_new_dub(
+    sort: str = "recent",
+    page: int = 1,
+    query_override: Optional[str] = None,
+    search_year: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Nově dabované seriály – vrací (items, has_more).
+
+    v0.0.164: query_override = volne hledani v rubrice.
+    """
+    log.debug("get_series_new_dub(sort=%s, ui_page=%s, override=%r)",
+              sort, page, query_override)
+    if query_override:
+        q = query_override.strip()
+        queries = _build_rubric_search_queries(
+            q, search_year,
+            extras=[f"{q} CZ dabing", f"{q} dabing", f"{q} S01 CZ"],
+        )
+        cache_key = (
+            f"rubrika:seriesnewdub:search:v1:{q.lower()}:y{search_year or 0}"
+        )
+        return _paginate_multi_query(
+            cache_key=cache_key,
+            queries=queries,
+            ui_page=page,
+            pre_filter=None,
+            post_filter=None,
+            sort_key=lambda it: _search_sort_key(it, want_year=search_year, query=q),
+            max_ws_pages=10,
+            grouping="series",
+            search_query=q,
+            search_year=search_year,
+            trust_ws_query=True,
+        )
+
     query = _addon_query("q_series_new_dub", DEFAULT_QUERIES["series_new_dub"])
     sort_mode = _read_sort("sort_series", SORT_SERIES)
 
@@ -4846,7 +4908,8 @@ def _fairy_file_year_ok(filename: str, classic_year: Optional[int]) -> bool:
 
 def _collect_episodes_files(series_name: str,
                             max_pages: int = 5,
-                            force_refresh: bool = False) -> List[Dict[str, Any]]:
+                            force_refresh: bool = False,
+                            alt_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     Stáhne všechny dostupné epizody seriálu z Webshare (do max_pages WS stránek).
     Vrátí matching soubory už po klasifikaci kvality/dabingu.
@@ -4860,6 +4923,8 @@ def _collect_episodes_files(series_name: str,
     (prvních 2-3 slova) - některá jména jsou natolik specifická, že
     Webshare full-text na celé jméno nematchuje (např. "House of the Dragon"
     nenajde, ale "House Dragon" ano).
+
+    v0.0.164: alt_names = EN original / další názvy (CZ lokalizace vs WS EN).
 
     CACHE 1h - klik na seriál pak nečeká na další WS roundtripy.
     force_refresh=True smaze cache a fetchne cerstvě.
@@ -4878,9 +4943,12 @@ def _collect_episodes_files(series_name: str,
         max_pages = max(int(max_pages or 5), 5)
         max_pages = min(max_pages, 5)
 
+    alt_key = "|".join(
+        sorted({_norm_compare(a) for a in (alt_names or []) if (a or "").strip()})
+    )
     cache_key = (
-        f"episodes_files:v9:{_norm_compare(series_name)}"
-        f":{'s' if strict else 'n'}:{classic_year or 0}"
+        f"episodes_files:v10:{_norm_compare(series_name)}"
+        f":{'s' if strict else 'n'}:{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
         try:
@@ -4905,6 +4973,17 @@ def _collect_episodes_files(series_name: str,
     folded = _ct.ascii_fold(series_name).strip()
     if folded and folded.lower() != series_name.lower():
         queries.append(folded)
+
+    # CZ + EN: original_name z TMDB / TV programu
+    for alt in (alt_names or []):
+        alt = (alt or "").strip()
+        if not alt:
+            continue
+        if alt not in queries:
+            queries.append(alt)
+        af = _ct.ascii_fold(alt).strip()
+        if af and af.lower() != alt.lower() and af not in queries:
+            queries.append(af)
 
     if strict:
         # Časté WS vzory bez spoléhání na oficiální název dílu
@@ -4957,6 +5036,30 @@ def _collect_episodes_files(series_name: str,
         except Exception:  # noqa: BLE001
             max_ep_cap = None
 
+    match_names: List[str] = [series_name]
+    for a in (alt_names or []):
+        a = (a or "").strip()
+        if a and a not in match_names:
+            match_names.append(a)
+
+    def _parse_ep_any(fname: str) -> Tuple[Optional[int], Optional[int]]:
+        for mn in match_names:
+            s, e = _parse_episode(fname, mn)
+            if s is not None and e is not None:
+                return s, e
+        return None, None
+
+    def _title_ok(detected: str) -> bool:
+        for mn in match_names:
+            if strict:
+                if _series_title_match(mn, detected):
+                    return True
+                if _kids_title_in_name(mn, detected):
+                    return True
+            elif _series_title_match_for_episodes(mn, detected):
+                return True
+        return False
+
     seen_idents: set = set()
     for qi, q in enumerate(queries):
         if _shutdown.is_shutting_down():
@@ -4985,7 +5088,7 @@ def _collect_episodes_files(series_name: str,
                     if strict and not _fairy_file_year_ok(name, classic_year):
                         continue
 
-                    s, e = _parse_episode(name, series_name)
+                    s, e = _parse_ep_any(name)
                     if s is None or e is None:
                         # Curated: zkus párování podle názvu dílu ve filename
                         if fairy and fairy.get("curated"):
@@ -5021,23 +5124,18 @@ def _collect_episodes_files(series_name: str,
                         ) or _series_name(name)
 
                     if strict:
-                        # Striktní shoda — žádný Voyo/fuzzy spillover
-                        ok = _series_title_match(series_name, detected)
-                        if not ok:
-                            ok_by_ep_title = False
-                            if fairy and fairy.get("curated"):
-                                try:
-                                    from . import czech_series_episodes as cse
-                                    ok_by_ep_title = (
-                                        cse.match_filename_to_episode(
-                                            series_name, name) is not None)
-                                except Exception:  # noqa: BLE001
-                                    ok_by_ep_title = False
-                            ok = ok_by_ep_title or _kids_title_in_name(
-                                series_name, name)
+                        ok = _title_ok(detected)
+                        if not ok and fairy and fairy.get("curated"):
+                            try:
+                                from . import czech_series_episodes as cse
+                                ok = (
+                                    cse.match_filename_to_episode(
+                                        series_name, name) is not None)
+                            except Exception:  # noqa: BLE001
+                                ok = False
                         if not ok:
                             continue
-                    elif not _series_title_match_for_episodes(series_name, detected):
+                    elif not _title_ok(detected):
                         continue
 
                     # Ulož parsované S/E na soubor (pro get_series_episodes)
@@ -5251,8 +5349,48 @@ def _episode_base_for_series(
     return f"{series_name.strip()} S{int(season):02d}E{int(episode):02d}"
 
 
+def _is_continuous_dily_show(
+    files: List[Dict[str, Any]],
+    series_name: str,
+) -> bool:
+    """
+    Telenovela / Ordinace: uploady jako „díl 847“ bez SxxEyy.
+    True = UI má ukázat chunky dílů, ne falešné TMDB sezóny.
+    """
+    se_n = 0
+    alt_n = 0
+    max_ep = 0
+    for f in files:
+        name = f.get("name") or ""
+        if _parse_se(name)[0] is not None:
+            se_n += 1
+            continue
+        _s, e = _parse_episode_alt(name, series_name)
+        if e is not None:
+            alt_n += 1
+            max_ep = max(max_ep, int(e))
+        elif f.get("_ep_number") is not None and f.get("_ep_season") == 1:
+            try:
+                ep = int(f["_ep_number"])
+            except (TypeError, ValueError):
+                continue
+            # Preferuj soubory bez SxxEyy markeru
+            if _parse_se(name)[0] is None:
+                alt_n += 1
+                max_ep = max(max_ep, ep)
+    if alt_n < 5:
+        return False
+    if alt_n < se_n:
+        return False
+    return max_ep >= 40
+
+
+_DILY_CHUNK = 50
+
+
 def get_series_seasons(series_name: str,
-                       force_refresh: bool = False) -> Dict[str, Any]:
+                       force_refresh: bool = False,
+                       alt_names: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     Vrátí seznam sezón konkrétního seriálu - dostupné z Webshare +
     enrichnuté z TMDB (poster, popis, počet TMDB epizod).
@@ -5262,26 +5400,7 @@ def get_series_seasons(series_name: str,
     v0.0.68: force_refresh=True smaze cache_key + cache pro
         _collect_episodes_files + per-season episode cache.
         Pouziva se z "Aktualizovat" tlacitka v series UI.
-
-    Returns:
-        {
-          "tmdb_id": int | None,
-          "title_localized": str,
-          "poster": str,
-          "fanart": str,
-          "plot": str,
-          "seasons": [
-            {
-              "season_number": int,
-              "name": str,           # ze TMDB nebo "Sezóna X"
-              "overview": str,
-              "ws_episode_count": int,  # kolik epizod máme na WS
-              "tmdb_episode_count": int,
-              "poster": str,
-              "air_date": str,
-            }
-          ]
-        }
+    v0.0.164: alt_names (EN original); continuous „díly“ chunky.
     """
     if not series_name:
         return {"seasons": []}
@@ -5298,8 +5417,15 @@ def get_series_seasons(series_name: str,
         except Exception:  # noqa: BLE001
             curated_map = None
 
+    alt_clean = [
+        a.strip() for a in (alt_names or [])
+        if (a or "").strip()
+        and _norm_compare(a) != _norm_compare(series_name)
+    ]
+    alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v2:{_norm_compare(series_name)}:y{classic_year or 0}"
+        f"series_seasons:v3:{_norm_compare(series_name)}"
+        f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
         # Smaze seasons cache + vsechny per-season eps caches pro tento seriál.
@@ -5311,6 +5437,10 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v2:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v3:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v10:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
                 f"episodes_files:v9:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -5324,7 +5454,9 @@ def get_series_seasons(series_name: str,
             return cached
 
     # 1) WS - posbíráme všechny epizody a zjistíme jaké sezóny máme
-    files = _collect_episodes_files(series_name, force_refresh=force_refresh)
+    files = _collect_episodes_files(
+        series_name, force_refresh=force_refresh, alt_names=alt_clean,
+    )
     ws_season_counts: Dict[int, int] = {}
     ws_episodes_per_season: Dict[int, set] = {}
     for f in files:
@@ -5351,9 +5483,14 @@ def get_series_seasons(series_name: str,
     tmdb_fanart = ""
     tmdb_plot = ""
     tmdb_seasons: List[Dict[str, Any]] = []
+    tmdb_original = ""
+    continuous = False
     try:
         from . import tmdb_tv_api
-        candidates = tmdb_tv_api.tmdb_lookup_tv(series_name) or []
+        lookup_q = series_name
+        candidates = tmdb_tv_api.tmdb_lookup_tv(lookup_q) or []
+        if not candidates and alt_clean:
+            candidates = tmdb_tv_api.tmdb_lookup_tv(alt_clean[0]) or []
         meta = None
         if classic_year and candidates:
             for c in candidates:
@@ -5372,19 +5509,92 @@ def get_series_seasons(series_name: str,
             tmdb_poster = meta.get("poster") or ""
             tmdb_fanart = meta.get("fanart") or ""
             tmdb_plot = meta.get("plot") or ""
-        if tmdb_id and curated_map is None:
-            # U curated pohádek neber TMDB počty (často 40+ z jiné verze)
+            tmdb_original = (meta.get("original") or "").strip()
+            if (
+                tmdb_original
+                and _norm_compare(tmdb_original) != _norm_compare(series_name)
+                and tmdb_original not in alt_clean
+            ):
+                # Doplň EN a znovu posbírej, pokud jsme ještě neměli original
+                alt_clean = list(alt_clean) + [tmdb_original]
+                files = _collect_episodes_files(
+                    series_name, force_refresh=False, alt_names=alt_clean,
+                )
+                ws_season_counts = {}
+                ws_episodes_per_season = {}
+                for f in files:
+                    if f.get("_ep_season") is not None and f.get("_ep_number") is not None:
+                        try:
+                            s, e = int(f["_ep_season"]), int(f["_ep_number"])
+                        except (TypeError, ValueError):
+                            s, e = _parse_episode(f.get("name") or "", series_name)
+                    else:
+                        s, e = _parse_episode(f.get("name") or "", series_name)
+                    if s is None or e is None:
+                        continue
+                    if curated_map is not None:
+                        if int(s) not in curated_map or int(e) not in curated_map.get(int(s), {}):
+                            continue
+                    ws_episodes_per_season.setdefault(int(s), set()).add(int(e))
+                for s, eps in ws_episodes_per_season.items():
+                    ws_season_counts[s] = len(eps)
+        continuous = (
+            curated_map is None
+            and _is_continuous_dily_show(files, series_name)
+        )
+        if tmdb_id and curated_map is None and not continuous:
             tmdb_seasons = tmdb_tv_api.get_seasons(tmdb_id)
         elif tmdb_id:
-            # Poster/plot ano, seasons si sestavíme ze šablony
             pass
     except Exception as exc:  # noqa: BLE001
         log.debug("get_series_seasons: TMDB lookup selhal: %s", exc)
+        continuous = (
+            curated_map is None
+            and _is_continuous_dily_show(files, series_name)
+        )
+
+    # 3a) Continuous díly (Ordinace…) — chunky po 50, bez fake TMDB sezón
+    if curated_map is None and continuous:
+        eps = sorted(ws_episodes_per_season.get(1, set()))
+        seasons_out: List[Dict[str, Any]] = []
+        if eps:
+            max_ep = max(eps)
+            for start in range(1, max_ep + 1, _DILY_CHUNK):
+                end = min(start + _DILY_CHUNK - 1, max_ep)
+                count = sum(1 for e in eps if start <= e <= end)
+                if count <= 0:
+                    continue
+                seasons_out.append({
+                    "season_number":      1,
+                    "name":               f"Díly {start}–{end}",
+                    "overview":           tmdb_plot or "",
+                    "ws_episode_count":   count,
+                    "tmdb_episode_count": 0,
+                    "poster":             tmdb_poster,
+                    "air_date":           "",
+                    "ep_from":            start,
+                    "ep_to":              end,
+                    "flat_dily":          True,
+                })
+        log.info("get_series_seasons(%r): continuous dily %d chunku (WS=%d)",
+                 series_name, len(seasons_out), len(files))
+        result = {
+            "tmdb_id":          tmdb_id,
+            "title_localized":  tmdb_title,
+            "original_title":   tmdb_original or (alt_clean[0] if alt_clean else ""),
+            "poster":           tmdb_poster,
+            "fanart":           tmdb_fanart,
+            "plot":             tmdb_plot,
+            "seasons":          seasons_out,
+            "flat_dily":        True,
+        }
+        cache.cache_set(seasons_cache_key, result)
+        return result
 
     # 3) Sloučit - sezóny, které máme na WS, plus TMDB metadata pokud existují
     tmdb_seasons_map = {int(s.get("season_number")): s for s in tmdb_seasons}
 
-    seasons_out: List[Dict[str, Any]] = []
+    seasons_out = []
     if curated_map is not None:
         all_season_nums = sorted(curated_map.keys())
     else:
@@ -5425,6 +5635,7 @@ def get_series_seasons(series_name: str,
     result = {
         "tmdb_id":          tmdb_id,
         "title_localized":  tmdb_title,
+        "original_title":   tmdb_original or (alt_clean[0] if alt_clean else ""),
         "poster":           tmdb_poster,
         "fanart":           tmdb_fanart,
         "plot":             tmdb_plot,
@@ -5437,7 +5648,10 @@ def get_series_seasons(series_name: str,
 def get_series_episodes(series_name: str,
                          season: Optional[int] = None,
                          page: int = 1,
-                         force_refresh: bool = False) -> List[Dict[str, Any]]:
+                         force_refresh: bool = False,
+                         alt_names: Optional[List[str]] = None,
+                         ep_from: Optional[int] = None,
+                         ep_to: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Vrátí epizody konkrétního seriálu (volitelně jen jedné sezóny),
     seskupené podle SxxEyy. Při dostupném TMDB ID se k epizodám doplní
@@ -5447,6 +5661,7 @@ def get_series_episodes(series_name: str,
                    (vhodné po klikknutí na S01 ve season folder).
                    None = všechny epizody (legacy chování).
     :param force_refresh: smaze cache + forcne fresh fetch z Webshare.
+    :param ep_from/ep_to: v0.0.164 filtr čísel dílů (continuous Ordinace).
     """
     if not series_name:
         return []
@@ -5455,11 +5670,17 @@ def get_series_episodes(series_name: str,
     if fairy and fairy.get("title"):
         series_name = fairy["title"]
     classic_year = (fairy or {}).get("year")
+    alt_clean = [
+        a.strip() for a in (alt_names or [])
+        if (a or "").strip()
+        and _norm_compare(a) != _norm_compare(series_name)
+    ]
 
     # CACHE 30 min - klik na sezónu pak nečeká na enrich epizod znovu
     ep_cache_key = (
-        f"series_eps:v3:{_norm_compare(series_name)}:s{season}"
-        f":y{classic_year or 0}"
+        f"series_eps:v4:{_norm_compare(series_name)}:s{season}"
+        f":y{classic_year or 0}:f{ep_from or 0}:t{ep_to or 0}"
+        f":a{'|'.join(sorted({_norm_compare(a) for a in alt_clean}))}"
     )
     if force_refresh:
         try:
@@ -5473,7 +5694,9 @@ def get_series_episodes(series_name: str,
                      series_name, season, len(cached))
             return list(cached)
 
-    files = _collect_episodes_files(series_name, force_refresh=force_refresh)
+    files = _collect_episodes_files(
+        series_name, force_refresh=force_refresh, alt_names=alt_clean,
+    )
     if not files:
         return []
 
@@ -5501,6 +5724,17 @@ def get_series_episodes(series_name: str,
     if season is not None:
         season_int = int(season)
         files = [f for f in files if _file_se(f)[0] == season_int]
+
+    # Continuous díly: jen rozsah ep_from..ep_to
+    if ep_from is not None or ep_to is not None:
+        lo = int(ep_from or 1)
+        hi = int(ep_to or 10 ** 9)
+
+        def _in_range(f: Dict[str, Any]) -> bool:
+            _s, e = _file_se(f)
+            return e is not None and lo <= int(e) <= hi
+
+        files = [f for f in files if _in_range(f)]
 
     # Curated šablona — jen známé díly (žádný garbage E99 z reality)
     curated_map = None
@@ -5716,16 +5950,44 @@ def get_quality_variants(
     episode_se: Optional[Tuple[int, int]] = None
 
     if mode == "episode":
-        m = re.search(r"(.+?)\s+S(\d{1,2})\s*[EX]\s*(\d{1,3})", base_title, re.I)
+        m = re.search(r"(.+?)\s+S(\d{1,2})\s*[EX]\s*(\d{1,4})", base_title, re.I)
         if m:
             episode_series = m.group(1).strip()
             episode_se = (int(m.group(2)), int(m.group(3)))
             log.info("get_quality_variants(episode): query='%s' (z base=%r)",
                      episode_series, base_title)
-            files = search_videos(query=episode_series, sort="rating", page=1)
+            # v0.0.164: multi-query jako u filmů (ne jen 1 WS page)
+            s_num, e_num = episode_se
+            ep_queries = [
+                episode_series,
+                f"{episode_series} S{s_num:02d}E{e_num:02d}",
+                f"{episode_series} S{s_num}E{e_num}",
+                f"{episode_series} dil {e_num}",
+                f"{episode_series} epizoda {e_num}",
+            ]
+            folded = _ct.ascii_fold(episode_series).strip()
+            if folded and folded.lower() != episode_series.lower():
+                ep_queries.append(folded)
+                ep_queries.append(f"{folded} S{s_num:02d}E{e_num:02d}")
+                ep_queries.append(f"{folded} dil {e_num}")
+            files = []
+            seen_ep: set = set()
+            for q in ep_queries:
+                q = (q or "").strip()
+                if not q:
+                    continue
+                for page in (1, 2):
+                    batch = search_videos(query=q, sort="rating", page=page) or []
+                    if not batch:
+                        break
+                    for f in batch:
+                        ident = f.get("ident") or f.get("id") or ""
+                        if ident and ident not in seen_ep:
+                            seen_ep.add(ident)
+                            files.append(f)
         else:
             episode_series = _series_name(base_title) or base_title
-            files = search_videos(query=base_title, sort="rating", page=1)
+            files = _fetch_ws_files_for_title(episode_series)
     else:
         files = _fetch_ws_files_for_title(base_title, year=year)
 

@@ -823,3 +823,11 @@ msgstr "Documentary movies CZ/SK"
 msgctxt "#30325"
 msgid "Search in documentaries..."
 msgstr "Search in documentaries..."
+
+msgctxt "#30326"
+msgid "Search in series..."
+msgstr "Search in series..."
+
+msgctxt "#30327"
+msgid "Search in new dubbed series..."
+msgstr "Search in new dubbed series..."

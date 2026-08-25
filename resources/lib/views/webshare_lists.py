@@ -176,10 +176,35 @@ def view_list_series(handle, base_url, params):
     _ensure_login()
     sort = params.get("sort", "rating")
     page = int(params.get("page", "1") or 1)
-    result = api_webshare.get_series(sort=sort, page=page)
+    query = params.get("query", "") or ""
+    search_year = _search_year_from_params(params)
+    result = api_webshare.get_series(
+        sort=sort, page=page,
+        query_override=query or None,
+        search_year=search_year,
+    )
     _, has_more = _split_result(result)
-    _render_series_list(handle, base_url, result, "list_series", page, sort)
-    _prefetch_next("list_series", api_webshare.get_series, sort, page, has_more)
+    _render_with_search_top(handle, base_url, result, "list_series",
+                             "search_series", page, sort,
+                             search_label_id=30326, query=query,
+                             search_year=search_year,
+                             content="tvshows",
+                             reset_label="<<< Vsechny serialy (zrusit filtr)")
+    if not query:
+        _prefetch_next("list_series", api_webshare.get_series, sort, page, has_more)
+    else:
+        _prefetch_next("list_series", api_webshare.get_series, sort, page, has_more,
+                       query_override=query, search_year=search_year)
+
+
+def view_search_series(handle, base_url, params):
+    """Klávesnice -> volné hledání v rubrice Seriály."""
+    _ensure_login()
+    q = ui.ask_keyboard(_tr(30326))
+    if not q:
+        xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
+        return
+    _apply_rubric_search(handle, base_url, view_list_series, q, params)
 
 
 def view_list_4k(handle, base_url, params):
@@ -330,11 +355,37 @@ def view_list_series_new_dub(handle, base_url, params):
     _ensure_login()
     sort = params.get("sort", "recent")
     page = int(params.get("page", "1") or 1)
-    result = api_webshare.get_series_new_dub(sort=sort, page=page)
+    query = params.get("query", "") or ""
+    search_year = _search_year_from_params(params)
+    result = api_webshare.get_series_new_dub(
+        sort=sort, page=page,
+        query_override=query or None,
+        search_year=search_year,
+    )
     _, has_more = _split_result(result)
-    _render_series_list(handle, base_url, result, "list_series_new_dub", page, sort)
-    _prefetch_next("list_series_new_dub", api_webshare.get_series_new_dub,
-                   sort, page, has_more)
+    _render_with_search_top(handle, base_url, result, "list_series_new_dub",
+                             "search_series_new_dub", page, sort,
+                             search_label_id=30327, query=query,
+                             search_year=search_year,
+                             content="tvshows",
+                             reset_label="<<< Vsechny dabovane serialy (zrusit filtr)")
+    if not query:
+        _prefetch_next("list_series_new_dub", api_webshare.get_series_new_dub,
+                       sort, page, has_more)
+    else:
+        _prefetch_next("list_series_new_dub", api_webshare.get_series_new_dub,
+                       sort, page, has_more,
+                       query_override=query, search_year=search_year)
+
+
+def view_search_series_new_dub(handle, base_url, params):
+    """Klávesnice -> hledání v Nově dabovaných seriálech."""
+    _ensure_login()
+    q = ui.ask_keyboard(_tr(30327))
+    if not q:
+        xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
+        return
+    _apply_rubric_search(handle, base_url, view_list_series_new_dub, q, params)
 
 
 def view_list_series_seasons(handle, base_url, params):
@@ -346,6 +397,7 @@ def view_list_series_seasons(handle, base_url, params):
     v0.0.68: podpora ?refresh=1 - vynuti fresh fetch z Webshare
         (smaze cache). Pouziva se z "Aktualizovat" tlacitka pri hledani
         premierovych/cerstve nahranych dilu.
+    v0.0.164: original= EN nazev pro WS; flat dily chunky.
     """
     _ensure_login()
     name = (params.get("name") or "").strip()
@@ -355,6 +407,9 @@ def view_list_series_seasons(handle, base_url, params):
         xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
         return
 
+    original = (params.get("original") or "").strip()
+    alt_names = [original] if original and original.lower() != name.lower() else None
+
     force_refresh = (params.get("refresh") or "") == "1"
     if force_refresh:
         ui.show_notification(
@@ -362,22 +417,29 @@ def view_list_series_seasons(handle, base_url, params):
             time_ms=4000,
         )
 
-    log.info("view_list_series_seasons: name=%r refresh=%s", name, force_refresh)
+    log.info("view_list_series_seasons: name=%r original=%r refresh=%s",
+             name, original, force_refresh)
     try:
-        info = api_webshare.get_series_seasons(name, force_refresh=force_refresh)
+        info = api_webshare.get_series_seasons(
+            name, force_refresh=force_refresh, alt_names=alt_names,
+        )
     except Exception as exc:  # noqa: BLE001
         log.exception("get_series_seasons(%r) selhalo: %s", name, exc)
         ui.show_notification(f"Chyba pri nacitani serialu: {exc}", time_ms=6000)
         info = {"seasons": []}
 
     seasons = info.get("seasons") or []
+    # Pokud TMDB našel original a URL ho neměla, drž ho v dalších URL
+    if not original:
+        original = (info.get("original_title") or "").strip()
 
     # Pokud nejsou sezóny detekované (např. seriál bez SxxEyy nebo malá
     # data z WS), fallback na všechny epizody bez foldering.
     if not seasons:
         log.info("view_list_series_seasons: %s - zadne sezony, fallback flat", name)
         _render_episodes_flat(handle, base_url, name, season=None,
-                              force_refresh=force_refresh)
+                              force_refresh=force_refresh,
+                              original=original or None)
         return
 
     fanart = info.get("fanart") or ""
@@ -387,8 +449,10 @@ def view_list_series_seasons(handle, base_url, params):
     # Pouziti: kdyz chce user nove premierove epizody (Voyo, Oneplay).
     addon = _addon()
     icon = addon.getAddonInfo("icon")
-    refresh_url = ui.build_url(base_url, action="list_series_seasons",
-                                name=name, refresh="1")
+    refresh_kwargs = {"action": "list_series_seasons", "name": name, "refresh": "1"}
+    if original:
+        refresh_kwargs["original"] = original
+    refresh_url = ui.build_url(base_url, **refresh_kwargs)
     ui.add_dir_item(
         handle=handle,
         label=("[COLOR FF00BFFF][B]>>> Aktualizovat - hledat nejnovejsi "
@@ -414,8 +478,17 @@ def view_list_series_seasons(handle, base_url, params):
         elif ws_count > 0:
             label = f"{label}  [{ws_count} epizod]"
 
-        url = ui.build_url(base_url, action="list_series_episodes",
-                           name=name, season=str(s_num))
+        ep_kwargs = {
+            "action": "list_series_episodes",
+            "name": name,
+            "season": str(s_num),
+        }
+        if original:
+            ep_kwargs["original"] = original
+        if s.get("flat_dily") and s.get("ep_from") is not None:
+            ep_kwargs["ep_from"] = str(s.get("ep_from"))
+            ep_kwargs["ep_to"] = str(s.get("ep_to"))
+        url = ui.build_url(base_url, **ep_kwargs)
 
         item = {
             "title":  label,
@@ -439,6 +512,7 @@ def view_list_series_episodes(handle, base_url, params):
     Pokud je předán parametr 'season', zobrazí jen epizody dané sezóny.
 
     v0.0.68: ?refresh=1 vynuti fresh fetch z Webshare pro nove epizody.
+    v0.0.164: original + ep_from/ep_to (continuous dily).
     """
     _ensure_login()
     name = (params.get("name") or "").strip()
@@ -449,6 +523,17 @@ def view_list_series_episodes(handle, base_url, params):
 
     season_raw = params.get("season") or ""
     season = int(season_raw) if season_raw and season_raw.isdigit() else None
+    original = (params.get("original") or "").strip() or None
+    ep_from = None
+    ep_to = None
+    try:
+        if params.get("ep_from"):
+            ep_from = int(params.get("ep_from"))
+        if params.get("ep_to"):
+            ep_to = int(params.get("ep_to"))
+    except (TypeError, ValueError):
+        ep_from = ep_to = None
+
     force_refresh = (params.get("refresh") or "") == "1"
     if force_refresh:
         ui.show_notification(
@@ -456,8 +541,13 @@ def view_list_series_episodes(handle, base_url, params):
             time_ms=4000,
         )
 
-    _render_episodes_flat(handle, base_url, name, season=season,
-                           force_refresh=force_refresh)
+    _render_episodes_flat(
+        handle, base_url, name, season=season,
+        force_refresh=force_refresh,
+        original=original,
+        ep_from=ep_from,
+        ep_to=ep_to,
+    )
 
 
 def view_list_latest(handle, base_url, params):

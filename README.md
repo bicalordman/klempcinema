@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.163**
+**Aktuální verze: 0.0.164**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.163.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.164.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -169,10 +169,11 @@ Autor: **Bicalorman**
 
 ## Změny
 
-### Souhrn 0.0.153 → 0.0.163
+### Souhrn 0.0.153 → 0.0.164
 
 | Oblast | Hlavní změny |
 |--------|----------------|
+| Seriály | Hledání v rubrice; lepší kvalita epizod; CZ+EN názvy do sezón; Ordinace „díly“ po 50 |
 | Hledání | Oprava franchise (Hobit…); nahoře jednoduchý název blízky dotazu, ne jen 4K/filmy |
 | Pohádky | Večerníček / TV: doplněna klasika (Broučci, Mach a Šebestová, Pojďte pane…) |
 | Picker kvality | Lepší značení jazyka; u `[?]` zkusí Language ze streamu (MKV) |
@@ -188,6 +189,13 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.164 — Seriály: hledání, kvalita, CZ+EN, díly
+
+- Hledání uvnitř rubrik Seriály / Nově dabované (jako u filmů)
+- Picker u epizod: multi-query WS (SxxEyy + díl + ASCII), ne jen 1 stránka
+- Sezóny hledají i EN original (TV program / TMDB)
+- Ordinace a podobné: složky „Díly 1–50“, „Díly 51–100“… místo falešných sezón
 
 ### v0.0.163 — Hledání: relevance názvu
 

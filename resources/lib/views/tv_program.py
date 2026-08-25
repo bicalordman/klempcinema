@@ -66,9 +66,13 @@ def _play_url_for_item(base_url: str, item: Dict[str, Any]) -> str:
             kwargs["tmdb_id"] = str(item["tmdb_id"])
         return ui.build_url(base_url, **kwargs)
     if kind in ("series", "documentary", "entertainment"):
-        return ui.build_url(
-            base_url, action="list_series_seasons", name=title,
-        )
+        kwargs = {
+            "action": "list_series_seasons",
+            "name": title,
+        }
+        if original and original.lower() != title.lower():
+            kwargs["original"] = original
+        return ui.build_url(base_url, **kwargs)
     kwargs = {
         "action": "tmdb_play_movie",
         "title": title,

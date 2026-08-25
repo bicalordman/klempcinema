@@ -77,7 +77,11 @@ def _add_discover_item(handle, base_url, meta: Dict[str, Any]) -> None:
         return
 
     if item_type == "series":
-        url = ui.build_url(base_url, action="list_series_seasons", name=title)
+        kwargs = {"action": "list_series_seasons", "name": title}
+        original = (meta.get("original_title") or meta.get("original") or "").strip()
+        if original and original.lower() != title.lower():
+            kwargs["original"] = original
+        url = ui.build_url(base_url, **kwargs)
         is_folder = True
     elif meta.get("base_title") and meta.get("variant_idents"):
         url = ui.build_url(

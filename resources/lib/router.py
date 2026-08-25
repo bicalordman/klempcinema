@@ -83,6 +83,8 @@ def _actions() -> Dict[str, Callable]:
         "menu_kids":             ws.view_menu_kids,
         "list_series":           ws.view_list_series,
         "list_series_new_dub":   ws.view_list_series_new_dub,
+        "search_series":         ws.view_search_series,
+        "search_series_new_dub": ws.view_search_series_new_dub,
         "list_series_seasons":   ws.view_list_series_seasons,
         "list_series_episodes":  ws.view_list_series_episodes,
         "list_latest":           ws.view_list_latest,
