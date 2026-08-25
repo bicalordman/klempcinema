@@ -135,6 +135,8 @@ $repoSubIndex = @"
 [System.IO.File]::WriteAllText((Join-Path $DocsRepo "$RepositoryId\index.html"), $repoSubIndex, [System.Text.UTF8Encoding]::new($false))
 
 # --- addons.xml (jen distributovatelne doplňky, ne samotny repository addon) ---
+# DULEZITE: GitHub Pages / git normalizuje na LF. Kodi overuje MD5 proti
+# stazenemu souboru — hash musi byt z LF bajtu, ne z Windows CRLF.
 $pluginBody = Get-AddonXmlBody (Join-Path $Root "addon.xml")
 $addonsXml = @"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -142,15 +144,20 @@ $addonsXml = @"
 $pluginBody
 </addons>
 "@
+$addonsXml = $addonsXml -replace "`r`n", "`n" -replace "`r", "`n"
 
 $addonsPath = Join-Path $DocsRepo "addons.xml"
-[System.IO.File]::WriteAllText($addonsPath, $addonsXml, [System.Text.UTF8Encoding]::new($false))
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+$addonsBytes = $utf8.GetBytes($addonsXml)
+[System.IO.File]::WriteAllBytes($addonsPath, $addonsBytes)
 
-$md5 = (Get-FileHash -Path $addonsPath -Algorithm MD5).Hash.ToLower()
+$md5 = [System.BitConverter]::ToString(
+    [System.Security.Cryptography.MD5]::Create().ComputeHash($addonsBytes)
+).Replace("-", "").ToLowerInvariant()
 [System.IO.File]::WriteAllText(
     (Join-Path $DocsRepo "addons.xml.md5"),
     $md5,
-    [System.Text.UTF8Encoding]::new($false)
+    $utf8
 )
 
 # GitHub Pages: vypnout Jekyll, jinak addons.xml nemusi fungovat
