@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.153.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.163.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -169,6 +169,14 @@ Autor: **Bicalorman**
 
 ## Změny
 
+### Souhrn 0.0.159 → 0.0.163
+
+| Oblast | Hlavní změny |
+|--------|----------------|
+| Hledání | Franchise (Hobit…) zase najdou správné díly; nahoře jednoduchý název blízky dotazu, ne jen 4K/filmy |
+| Pohádky | Večerníček / TV: doplněna klasika (Broučci, Mach a Šebestová, Pojďte pane…) |
+| Picker kvality | Lepší značení jazyka; u `[?]` zkusí Language ze streamu (MKV) |
+
 ### Souhrn 0.0.137 → 0.0.153
 
 | Oblast | Hlavní změny |
@@ -179,6 +187,24 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.163 — Hledání: relevance názvu
+
+- U výsledků hledání napřed jednoduchý titul blízky dotazu (ne dlouhé EN názvy / jen kvalita)
+- Filmy nepřeskakují seriály jen pořadím skládání; TMDB doplní i seriálové názvy
+
+### v0.0.162 — Večerníčky
+
+- Pohádky → Večerníček / TV: ~25 klasických večerníčků (Broučci, Mach a Šebestová, Pojďte pane budeme si hrát, Křemílek, Rákosníček, Pat a Mat…)
+
+### v0.0.160–0.0.161 — Picker: jazyk
+
+- `[EN]` jen při explicitním ENG; jinak Dual / Multi / `?`
+- Před pickerem krátká sonda MKV Language → často `[CZ]` místo `[?]`
+
+### v0.0.159 — Oprava hledání (franchise)
+
+- Jednoslovné dotazy (Hobit, Avengers…) zase najdou díly; bare WS dotaz první (ne `{název} 2026`)
 
 ### v0.0.153 — TV program: plakáty, přehrávání, SK
 
