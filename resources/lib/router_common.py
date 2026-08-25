@@ -189,7 +189,7 @@ def _split_result(result):
 
 
 def _add_refresh_button(handle: int, base_url: str, list_action: str,
-                         sort: str = "", query: str = "") -> None:
+                         sort: str = "", query: str = "", **extra) -> None:
     """v0.0.63: prida '>>> Aktualizovat' button na vrch rubriky.
 
     Klik -> refresh_rubrika action -> smaze cache klic + redirect zpet
@@ -204,13 +204,13 @@ def _add_refresh_button(handle: int, base_url: str, list_action: str,
     addon = _addon()
     icon = addon.getAddonInfo("icon")
     fanart = addon.getAddonInfo("fanart")
-    extra = {}
+    params = dict(extra or {})
     if sort:
-        extra["sort"] = sort
+        params["sort"] = sort
     if query:
-        extra["query"] = query
+        params["query"] = query
     url = ui.build_url(base_url, action="refresh_rubrika",
-                       target=list_action, **extra)
+                       target=list_action, **params)
     ui.add_dir_item(
         handle=handle,
         label="[COLOR FF66CCFF][I]>>> Aktualizovat "
@@ -283,9 +283,17 @@ def _render_movie_list(
 
     # v0.0.63: refresh button na vrchu page 1 (force fresh fetch z Webshare).
     if page == 1:
-        _add_refresh_button(handle, base_url, list_action, sort=sort)
+        _add_refresh_button(handle, base_url, list_action, sort=sort,
+                            **next_extra)
 
     for item in items:
+        # Vícedílné pohádky (Arabela…) → složka epizod jako u seriálů
+        if item.get("series_name"):
+            sname = (item.get("title") or item.get("series_name") or "").strip()
+            url = ui.build_url(base_url, action="list_series_seasons",
+                               name=sname)
+            ui.add_video_item(handle, item, url, is_folder=True)
+            continue
         if item.get("base_title"):
             url = _build_play_pick_url(base_url, item["base_title"],
                                        mode="movie", cz_only=cz_only,

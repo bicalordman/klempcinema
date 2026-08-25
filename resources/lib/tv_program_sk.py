@@ -29,7 +29,7 @@ API_EPG = "https://api.webtv.sk/epg/channel"
 
 CACHE_KEY = "tv_program:sk:webtv:v1"
 CACHE_TTL = 2 * 3600
-HTTP_TIMEOUT = 8
+HTTP_TIMEOUT = 4  # v0.0.158: 8->4s — rychlejsi Quit Kodi
 
 # Hlavni SK stanice (bez +1 a sportu).
 SK_CHANNEL_IDS: Tuple[str, ...] = (
@@ -284,13 +284,35 @@ def _fetch_live() -> List[Dict[str, Any]]:
         return local_items
 
     try:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=6, thread_name_prefix="tvsk") as pool:
-            for part in pool.map(_one_channel, SK_CHANNEL_IDS):
-                out.extend(part)
+        from concurrent.futures import ThreadPoolExecutor, wait
+        from . import shutdown as _shutdown
+        # v0.0.158: NE `with ThreadPoolExecutor` — __exit__ dela wait=True
+        # a pri Quit blokuje az dobehnou vsechny kanaly.
+        pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="tvsk")
+        try:
+            futs = [pool.submit(_one_channel, cid) for cid in SK_CHANNEL_IDS]
+            pending = set(futs)
+            while pending and not _shutdown.is_shutting_down():
+                done, pending = wait(pending, timeout=0.5)
+                for fut in done:
+                    try:
+                        out.extend(fut.result())
+                    except Exception as exc:  # noqa: BLE001
+                        log.debug("tv_sk channel fut: %s", exc)
+        finally:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
     except Exception as exc:  # noqa: BLE001
         log.warning("tv_sk: parallel fetch fail, serial: %s", exc)
+        try:
+            from . import shutdown as _shutdown
+        except Exception:  # noqa: BLE001
+            _shutdown = None  # type: ignore
         for cid in SK_CHANNEL_IDS:
+            if _shutdown is not None and _shutdown.is_shutting_down():
+                break
             out.extend(_one_channel(cid))
 
     out.sort(key=lambda x: (x.get("start_min") or 0, x.get("channel") or ""))

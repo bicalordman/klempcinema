@@ -389,14 +389,17 @@ def view_refresh_rubrika(handle, base_url, params):
     ui.show_notification(
         f"Aktualizuji rubriku ({n} cache klicu smazano)...", time_ms=3000)
 
-    # Zpet na rubric s zachovanim sort/query.
+    # Zpet na rubric s zachovanim sort/query/tag.
     redirect_params = {"action": target, "page": 1}
     sort = (params.get("sort") or "").strip()
     query = (params.get("query") or "").strip()
+    tag = (params.get("tag") or "").strip()
     if sort:
         redirect_params["sort"] = sort
     if query:
         redirect_params["query"] = query
+    if tag:
+        redirect_params["tag"] = tag
 
     redirect_url = ui.build_url(base_url, **redirect_params)
     import xbmc  # type: ignore

@@ -37,10 +37,14 @@ class TestApiWebshareSeriesMethods(unittest.TestCase):
 
 class TestApiWebshareSeriesSeasonEpisodeFlow(unittest.TestCase):
     def test_get_series_seasons_uses_ws_and_tmdb(self):
-        fake_tmdb = types.SimpleNamespace(
-            tmdb_lookup_tv_first=lambda name: {"tmdb_id": 123, "title": "My Series", "poster": "http://p", "fanart": "http://f", "plot": "Plot"},
-            get_seasons=lambda tmdb_id: [{"season_number": 1, "name": "Season 1", "overview": "Overview", "episode_count": 10, "poster": "http://p1", "air_date": "2024-01-01"}],
-        )
+        fake_lookup = MagicMock(return_value=[
+            {"tmdb_id": 123, "title": "My Series", "poster": "http://p",
+             "fanart": "http://f", "plot": "Plot", "year": 2024},
+        ])
+        fake_seasons = MagicMock(return_value=[
+            {"season_number": 1, "name": "Season 1", "overview": "Overview",
+             "episode_count": 10, "poster": "http://p1", "air_date": "2024-01-01"},
+        ])
 
         with patch.object(api_webshare, "_collect_episodes_files", return_value=[{"name": "My Series S01E01"}]):
             with patch.object(api_webshare, "cache", autospec=True) as cache_mock:
@@ -48,11 +52,9 @@ class TestApiWebshareSeriesSeasonEpisodeFlow(unittest.TestCase):
                 cache_mock.cache_set.return_value = None
                 cache_mock.cache_delete.return_value = None
                 cache_mock.cache_clear_prefix.return_value = None
-                # Musí se přepsat i atribut balíčku lib — jinak `from . import`
-                # vrátí dříve načtený reálný modul (po get_series_episodes).
-                import lib as _lib_pkg
-                with patch.dict(sys.modules, {"lib.tmdb_tv_api": fake_tmdb}):
-                    with patch.object(_lib_pkg, "tmdb_tv_api", fake_tmdb, create=True):
+                import lib.tmdb_tv_api as _tmdb_mod
+                with patch.object(_tmdb_mod, "tmdb_lookup_tv", fake_lookup):
+                    with patch.object(_tmdb_mod, "get_seasons", fake_seasons):
                         seasons_info = api_webshare.get_series_seasons(
                             "My Series", force_refresh=True
                         )

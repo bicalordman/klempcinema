@@ -120,7 +120,7 @@ NEG_CACHE_TTL = 30 * 60
 
 CACHE_KEY_PREFIX = "voyo:section:v1"
 
-HTTP_TIMEOUT = 6
+HTTP_TIMEOUT = 4  # v0.0.158: 6->4s
 
 # Googlebot UA obchazi GDPR consent overlay (whitelist pro SEO bot).
 HEADERS = {

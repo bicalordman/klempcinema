@@ -329,7 +329,14 @@ def view_play_pick(handle, params):
     if len(variants) == 1:
         chosen = variants[0]
     else:
-        # v0.0.104: pri vice variantach VZDY picker (i kdyz auto_pick zapnuto).
+        # v0.0.161: u variant bez jazyka v nazvu zkus Language z MKV head
+        # (stejne CZ, ktere pak vidi Kodi ve stopach) — max ~3.5 s.
+        try:
+            variants = api_webshare.enrich_variants_lang_probe(
+                variants, token or None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("lang_probe pred pickerem: %s", exc)
         labels = api_webshare.build_variant_picker_labels(variants)
         idx = xbmcgui.Dialog().select(_tr(30030), labels)
         if idx < 0:

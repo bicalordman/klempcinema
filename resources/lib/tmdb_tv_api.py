@@ -251,6 +251,25 @@ def get_season_episodes(tmdb_id: int, season_number: int) -> List[Dict[str, Any]
             "rating":         float(ep.get("vote_average") or 0),
             "votes":          int(ep.get("vote_count") or 0),
         })
+    # cs-CZ často nemá name — doplň z en-US
+    if any(not (e.get("name") or "").strip() for e in out):
+        try:
+            data_en = _tmdb._http_get(
+                f"/tv/{tmdb_id}/season/{season_number}", language="en-US")
+            by_num = {
+                int(ep.get("episode_number") or 0): ep
+                for ep in (data_en or {}).get("episodes") or []
+            }
+            for e in out:
+                if (e.get("name") or "").strip():
+                    continue
+                en = by_num.get(int(e.get("episode_number") or 0)) or {}
+                if en.get("name"):
+                    e["name"] = en["name"]
+                if not (e.get("overview") or "").strip() and en.get("overview"):
+                    e["overview"] = en["overview"]
+        except Exception as exc:  # noqa: BLE001
+            log.debug("season en-US fallback selhal: %s", exc)
     cache.cache_set(key, out)
     return out
 

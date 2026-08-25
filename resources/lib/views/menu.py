@@ -116,7 +116,7 @@ def view_menu_movies(handle: int, base_url: str) -> None:
         (30091, "list_bluray",          {"sort": "recent", "page": 1}, _addon_icon_for("bluray.png")),
         (30095, "list_animated",        {"sort": "recent", "page": 1}, _mi("movies_animated")),
         (30324, "list_documentary",     {"sort": "recent", "page": 1}, _mi("movies_docs")),
-        (30042, "list_kids",            {"sort": "rating", "page": 1}, _mi("movies_kids")),
+        (30042, "menu_kids",            {}, _mi("movies_kids")),
         (30007, "list_latest",          {"sort": "recent", "page": 1}, _mi("movies_latest")),
     ]
     _render_menu(handle, base_url, menu)

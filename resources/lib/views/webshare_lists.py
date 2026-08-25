@@ -133,10 +133,43 @@ def view_list_kids(handle, base_url, params):
     _ensure_login()
     sort = params.get("sort", "rating")
     page = int(params.get("page", "1") or 1)
-    result = api_webshare.get_kids(sort=sort, page=page)
+    tag = (params.get("tag") or "").strip()
+    result = api_webshare.get_kids(sort=sort, page=page, tag=tag)
     _, has_more = _split_result(result)
-    _render_movie_list(handle, base_url, result, "list_kids", page, sort)
-    _prefetch_next("list_kids", api_webshare.get_kids, sort, page, has_more)
+    extra = {}
+    if tag:
+        extra["tag"] = tag
+    _render_movie_list(handle, base_url, result, "list_kids", page, sort,
+                       **extra)
+    _prefetch_next("list_kids", api_webshare.get_kids, sort, page, has_more,
+                    tag=tag)
+
+
+def view_menu_kids(handle, base_url, params=None):
+    """Submenu Pohádky: všechny / vánoční / klasika / moderní / večerníček."""
+    from .. import czech_fairy_tales as cft
+    _ensure_login()
+    addon = _addon()
+    fanart = addon.getAddonInfo("fanart")
+
+    def _mi(name: str) -> str:
+        from ..router_common import _addon_icon_for
+        return _addon_icon_for(f"menu/{name}.png")
+
+    for tag, label, icon_name in cft.KIDS_SECTIONS:
+        n = cft.count(tag or None)
+        url_params = {"sort": "rating", "page": 1}
+        if tag:
+            url_params["tag"] = tag
+        url = ui.build_url(base_url, action="list_kids", **url_params)
+        ui.add_dir_item(
+            handle=handle,
+            label=f"[B]{label}[/B]  ({n})",
+            url=url,
+            icon=_mi(icon_name),
+            fanart=fanart,
+        )
+    ui.end_directory(handle, content="files")
 
 
 def view_list_series(handle, base_url, params):

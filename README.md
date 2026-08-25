@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.153**
+**Aktuální verze: 0.0.163**
 
 ---
 

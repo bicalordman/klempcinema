@@ -112,8 +112,8 @@ DEFAULT_HEADERS = {
 FORM_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
 }
-# v0.0.63: 15 -> 8s. v0.0.81: 8 -> 5s (rychlejsi shutdown + first load).
-DEFAULT_TIMEOUT = 5
+# v0.0.63: 15 -> 8s. v0.0.81: 8 -> 5s. v0.0.158: 5 -> 3s (rychlejsi Quit).
+DEFAULT_TIMEOUT = 3
 
 # Kolik souborů načítáme z Webshare na jednu stránku.
 PAGE_LIMIT = 200
@@ -837,6 +837,25 @@ _BARE_DUB_WORD_RE = re.compile(
 
 _DUAL_AUDIO_HINT = re.compile(r"\bdual\b", re.IGNORECASE)
 
+# Multi-audio / multi-lang v nazvu (bez jistoty CZ).
+_MULTI_AUDIO_HINT = re.compile(
+    r"(?:^|[\W_])(?:multi|multilang|multi[\W_]?audio|mua)(?:[\W_]|$)",
+    re.IGNORECASE,
+)
+
+# Explicitni anglictina v nazvu — teprve pak smime napsat [EN].
+# Bez toho je [EN] lez: UHD releasy na WS casto maji CZ dab i bez CZ v nazvu.
+_EXPLICIT_EN_PATTERN = re.compile(
+    r"(?:^|[\W_])(?:"
+    r"eng(?:lish)?|"
+    r"en[\W_]?(?:audio|dub|dubbed)?|"
+    r"original[\W_]?(?:audio|sound)?|"
+    r"\bvo\b|"
+    r"ov[\W_]?en"
+    r")(?:[\W_]|$)",
+    re.IGNORECASE,
+)
+
 # Zachováno pro zpětnou kompatibilitu (používá se v UI badges).
 _DUB_PATTERN = re.compile(
     r"(?:^|[\W_])(?:cz|sk|cz[-_ ]?dab|sk[-_ ]?dab|dab(?:ing|ovan[ýé])?|"
@@ -870,12 +889,11 @@ _CZ_OR_SK_PATTERN = re.compile(
 # Sledujeme: tit, titulky, sub, subs, subtitles, forced subs, hardsubs.
 _SUB_PATTERN = re.compile(
     r"(?:^|[\W_])(?:"
-    r"cz[-_ ]?(?:tit|titulky|sub|subs|subtitles)|"
-    r"sk[-_ ]?(?:tit|titulky|sub|subs|subtitles)|"
-    r"(?:tit|titulky|sub|subs|subtitles)[-_ ]?cz|"
-    r"(?:tit|titulky|sub|subs|subtitles)[-_ ]?sk|"
-    r"forced[-_ ]?cz|hardsub[-_ ]?cz|"
-    r"cestit|sktit"  # zkratky bez separator
+    r"cz[\W_]*(?:tit|titulky|sub|subs|subtitles)|"
+    r"sk[\W_]*(?:tit|titulky|sub|subs|subtitles)|"
+    r"(?:tit|titulky|sub|subs|subtitles)[\W_]*(?:cz|sk)|"
+    r"forced[\W_]*cz|hardsub[\W_]*cz|"
+    r"cestit|sktit"
     r")(?:[\W_]|$)",
     re.IGNORECASE,
 )
@@ -1565,6 +1583,34 @@ _TITLE_QUALITY_TOKEN_RE = re.compile(
 )
 
 
+# Stopwords pri hledani (EN cleny) — primarni token "The Hobbit" = hobbit.
+_SEARCH_STOPWORDS = frozenset({
+    "the", "a", "an", "le", "la", "el", "der", "die", "das", "of", "and",
+})
+# Jednoslovny dotaz + 1 prijmeni = cizi osoba (Michael Jordan), ne film.
+_SEARCH_PERSON_EXTRA = frozenset({
+    "jordan", "george", "jackson", "collins", "myers", "moore", "scott",
+    "smith", "jones", "williams", "brown", "davis", "wilson", "taylor",
+})
+
+
+def _title_meaningful_token_list(s: str) -> List[str]:
+    """Stejne filtrovani jako _title_meaningful_tokens, ale zachova poradi."""
+    if not s:
+        return []
+    tokens = re.findall(r"\w+", s.lower())
+    out: List[str] = []
+    seen: set = set()
+    for t in tokens:
+        if _TITLE_YEAR_TOKEN_RE.match(t) or _TITLE_QUALITY_TOKEN_RE.match(t):
+            continue
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
 def _title_meaningful_tokens(s: str) -> set:
     """
     Rozdeli nazev na slova (lowercase), vyhodi rok a quality tagy.
@@ -1576,17 +1622,37 @@ def _title_meaningful_tokens(s: str) -> set:
       "Michael Jordan"           -> {"michael", "jordan"}
       "George Michael Live"      -> {"george", "michael", "live"}
     """
-    if not s:
-        return set()
-    tokens = re.findall(r"\w+", s.lower())
-    out: set = set()
-    for t in tokens:
-        if _TITLE_YEAR_TOKEN_RE.match(t):
+    return set(_title_meaningful_token_list(s))
+
+
+def _token_soft_eq(a: str, b: str) -> bool:
+    """Shoda tokenu vcetne drobnych preklepu / CZ vs EN (hobit/hobbit)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if la < 4 or lb < 4:
+        return False
+    if a.startswith(b) or b.startswith(a):
+        return abs(la - lb) <= 2
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        return sum(1 for x, y in zip(a, b) if x != y) <= 1
+    # jeden vlozeny/zmazany znak
+    shorter, longer = (a, b) if la < lb else (b, a)
+    i = j = diffs = 0
+    while i < len(shorter) and j < len(longer):
+        if shorter[i] != longer[j]:
+            diffs += 1
+            if diffs > 1:
+                return False
+            j += 1
             continue
-        if _TITLE_QUALITY_TOKEN_RE.match(t):
-            continue
-        out.add(t)
-    return out
+        i += 1
+        j += 1
+    return True
 
 
 def _title_tokens_match(target: str, candidate: str) -> bool:
@@ -1701,15 +1767,198 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
     return False
 
 
-def _variant_lang_tag(name: str) -> str:
-    """Jazykovy tag pro picker - klasicky format jako drive."""
+def _variant_lang_tag(name: str, probed_tag: str = "") -> str:
+    """
+    Jazykovy tag pro picker.
+
+    v0.0.160: Bez markeru NIKDY nepsat [EN] jen z nazvu.
+    v0.0.161: probed_tag z hlavicky streamu (MKV Language) ma prioritu
+    kdyz nazev jazyk neuvadi — stejne info, ktere Kodi ukaze ve stopach.
+    """
+    if probed_tag:
+        return probed_tag
     if _detect_dubbed(name):
         if re.search(r"\bSK\b|slovensk\w*|\bdab\s+SK\b", name, re.IGNORECASE):
             return "SK dab"
         return "CZ dab"
     if _detect_subtitles(name):
         return "CZ tit"
-    return "EN"
+    if _DUAL_AUDIO_HINT.search(name or ""):
+        return "Dual"
+    if _MULTI_AUDIO_HINT.search(name or ""):
+        return "Multi"
+    if _EXPLICIT_EN_PATTERN.search(name or ""):
+        return "EN"
+    return "?"
+
+
+# ISO/BCP kodiky, ktere potkavame v MKV Language elementech.
+_PROBE_CZ = frozenset({"cz", "cze", "ces", "czech", "cs"})
+_PROBE_SK = frozenset({"sk", "slo", "slk", "slovak"})
+_PROBE_EN = frozenset({"en", "eng", "english"})
+
+# Hledani Language poli v zacatku kontejneru (MKV/MP4).
+_PROBE_LANG_RE = re.compile(
+    rb"(?:Language|LANGUAGE|Lang|hdlr)"
+    rb"[\x00=\:\"\'\s\x80-\xff]{0,6}"
+    rb"([A-Za-z]{2,3})",
+    re.DOTALL,
+)
+# Matroska Language element ID = 0x22B59C
+_PROBE_MKV_LANG_RE = re.compile(
+    rb"\x22\xb5\x9c[\x80-\xff]{0,2}([a-z]{2,3})(?:\x00|[\x80-\xff])",
+)
+
+
+def _langs_from_container_head(data: bytes) -> set:
+    """Vytahne jazykove kody z prvniho kusu MKV/MP4 (jako Kodi ze stop)."""
+    found: set = set()
+    if not data or len(data) < 8:
+        return found
+    for rx in (_PROBE_MKV_LANG_RE, _PROBE_LANG_RE):
+        for m in rx.finditer(data):
+            code = (m.group(1) or b"").decode("ascii", errors="ignore").lower()
+            if len(code) < 2:
+                continue
+            # Odfiltruj nahodne zkratky z binarnich dat
+            if code in _PROBE_CZ | _PROBE_SK | _PROBE_EN | {"und", "nar"}:
+                found.add(code)
+    return found
+
+
+def _tag_from_probed_langs(langs: set) -> str:
+    """Mapovani nactenych kodu -> tag pickeru."""
+    if not langs:
+        return ""
+    has_cz = bool(langs & _PROBE_CZ)
+    has_sk = bool(langs & _PROBE_SK)
+    has_en = bool(langs & _PROBE_EN)
+    if has_cz and has_en:
+        return "Dual"
+    if has_cz and has_sk:
+        return "CZ+SK"
+    if has_cz:
+        return "CZ"  # ze streamu — muze byt dab i original
+    if has_sk:
+        return "SK"
+    if has_en:
+        return "EN"
+    return ""
+
+
+def _http_get_bytes(url: str, max_bytes: int = 786432,
+                    timeout: float = 2.5) -> bytes:
+    """Stahne zacatek souboru (Range) — pro Language probe."""
+    if not url or _shutdown.is_shutting_down():
+        return b""
+    headers = dict(DEFAULT_HEADERS)
+    headers["Range"] = f"bytes=0-{max(0, max_bytes - 1)}"
+    req = Request(url, headers=headers, method="GET")
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return resp.read(max_bytes) or b""
+    except Exception as exc:  # noqa: BLE001
+        log.debug("_http_get_bytes selhalo: %s", exc)
+        return b""
+
+
+def probe_stream_lang_tag(token: Optional[str], ident: str,
+                          item_type: str = "movie") -> str:
+    """
+    Zjisti jazyk audio stop ze zacatku streamu (bez celeho stazeni).
+
+    Cache 7 dni per ident. Pri chybe/timeoutu vraci ''.
+    """
+    ident = (ident or "").strip()
+    if not ident:
+        return ""
+    cache_key = f"langprobe:v1:{ident}"
+    try:
+        cached = cache.cache_get(cache_key, ttl=7 * 86400)
+        if cached is not None:
+            return str(cached or "")
+    except Exception:  # noqa: BLE001
+        pass
+
+    tag = ""
+    try:
+        url = get_stream_url(token, ident, item_type)
+        if url:
+            head = _http_get_bytes(url, max_bytes=786432, timeout=2.2)
+            tag = _tag_from_probed_langs(_langs_from_container_head(head))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("probe_stream_lang_tag(%s): %s", ident, exc)
+
+    try:
+        cache.cache_set(cache_key, tag)
+    except Exception:  # noqa: BLE001
+        pass
+    return tag
+
+
+def enrich_variants_lang_probe(
+    variants: List[Dict[str, Any]],
+    token: Optional[str] = None,
+    *,
+    max_probe: int = 8,
+    wall_sec: float = 3.5,
+) -> List[Dict[str, Any]]:
+    """
+    Doplni lang_tag ze streamu u variant, kde nazev jazyk neuvadi ([?]).
+
+    Volat pred quality pickerem — listing nerusi (jen play_pick).
+    """
+    if not variants:
+        return variants
+    need: List[Tuple[int, Dict[str, Any]]] = []
+    for i, v in enumerate(variants):
+        name = v.get("name") or ""
+        if _variant_lang_tag(name) != "?":
+            continue
+        if not (v.get("ident") or v.get("id")):
+            continue
+        need.append((i, v))
+        if len(need) >= max_probe:
+            break
+    if not need:
+        return variants
+
+    def _one(item: Dict[str, Any]) -> str:
+        ident = item.get("ident") or item.get("id") or ""
+        return probe_stream_lang_tag(token, ident, "movie")
+
+    results: Dict[int, str] = {}
+    pool = None
+    try:
+        pool = ThreadPoolExecutor(max_workers=min(4, len(need)))
+        futs = {pool.submit(_one, v): idx for idx, v in need}
+        done, pending = wait(futs.keys(), timeout=wall_sec)
+        for fut in done:
+            idx = futs[fut]
+            try:
+                tag = fut.result()
+                if tag:
+                    results[idx] = tag
+            except Exception:  # noqa: BLE001
+                pass
+        for fut in pending:
+            fut.cancel()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("enrich_variants_lang_probe: %s", exc)
+    finally:
+        if pool is not None:
+            _shutdown_pool(pool)
+
+    if not results:
+        return variants
+    out = [dict(v) for v in variants]
+    for idx, tag in results.items():
+        out[idx]["lang_tag"] = tag
+        # Aby UI badges / cz_only videly CZ ze streamu
+        if tag in ("CZ", "CZ+SK", "Dual"):
+            out[idx]["dubbed"] = True
+    log.info("lang_probe: doplneno %d/%d variant", len(results), len(need))
+    return out
 
 
 def _variant_short_hint(name: str) -> str:
@@ -1745,7 +1994,7 @@ def format_variant_label_compact(f: Dict[str, Any]) -> str:
     quality = _quality_label(name) or "SD"
     audio = detect_audio_for_picker(name)
     size = _format_size(f.get("size"))
-    lang = _variant_lang_tag(name)
+    lang = _variant_lang_tag(name, probed_tag=(f.get("lang_tag") or ""))
 
     parts: List[str] = [f"[{quality}]"]
     if audio:
@@ -1792,11 +2041,14 @@ def format_variant_label(f: Dict[str, Any]) -> str:
     Audio se zobrazuje pouze pokud je nadprůměrné (Atmos / DTS:X / TrueHD /
     DTS-HD / DTS / DD+ / 5.1 / 7.1) - prosté stereo nevypisujeme.
 
-    Jazyk audio stopy:
-        [CZ dab]   - cesky dabing
+    Jazyk audio stopy (jen z nazvu souboru — Webshare stream neprobe):
+        [CZ dab]   - cesky dabing (marker v nazvu)
         [SK dab]   - slovensky dabing
-        [CZ tit]   - puvodne titulky
-        [EN]       - bez CZ/SK dabingu i titulku (asi puvodni)
+        [CZ tit]   - ceske/slovenske titulky v nazvu
+        [Dual]     - dual audio v nazvu
+        [Multi]    - multi audio v nazvu
+        [EN]       - explicitni EN/ENG v nazvu
+        [?]        - jazyk v nazvu neni — muze byt CZ i EN (typicky UHD)
     """
     name = f.get("name") or ""
     quality = _quality_label(name) or "?"
@@ -1806,7 +2058,7 @@ def format_variant_label(f: Dict[str, Any]) -> str:
     if len(raw) > 60:
         raw = raw[:57] + "..."
 
-    lang = _variant_lang_tag(name)
+    lang = _variant_lang_tag(name, probed_tag=(f.get("lang_tag") or ""))
 
     parts = [f"[{quality}]"]
     if audio:
@@ -1946,6 +2198,9 @@ def search_videos(
     """
     if not query:
         log.info("search_videos(): prázdný query.")
+        return []
+
+    if _shutdown.is_shutting_down():
         return []
 
     token = get_token()
@@ -3438,12 +3693,75 @@ def _read_year_range() -> tuple:
     return (min_y, max_y)
 
 
-def _search_sort_key(it: Dict[str, Any], want_year: Optional[int] = None):
+def _search_title_relevance(query: str, it: Dict[str, Any]) -> int:
+    """
+    Jak blizko je zobrazovany titul k uzivatelskemu dotazu (vyssi = lepsi).
+
+    Jednoduche / kratke nazvy blizke dotazu ("Hobit") nahoru;
+    dlouhe slozite ("The Hobbit An Unexpected Journey Extended…") dolu.
+    """
+    q = (query or "").strip()
+    if not q:
+        return 0
+    title = (
+        it.get("base_title")
+        or it.get("title_localized")
+        or it.get("series_name")
+        or it.get("title")
+        or ""
+    )
+    q_list = [
+        t for t in _title_meaningful_token_list(q)
+        if t not in _SEARCH_STOPWORDS
+    ]
+    t_list = [
+        t for t in _title_meaningful_token_list(title)
+        if t not in _SEARCH_STOPWORDS
+    ]
+    if not q_list or not t_list:
+        return 0
+
+    score = 0
+    # Vsechny tokeny dotazu soft-match v nazvu
+    matched = 0
+    for qt in q_list:
+        if any(_token_soft_eq(qt, ct) for ct in t_list):
+            matched += 1
+    if matched < len(q_list):
+        return max(0, matched * 5)
+
+    score += 80  # plna shoda tokenu dotazu
+    # Zacina stejnymi tokeny (Hobit …, ne „Something Hobit Extra“)
+    prefix_ok = True
+    for i, qt in enumerate(q_list):
+        if i >= len(t_list) or not _token_soft_eq(qt, t_list[i]):
+            prefix_ok = False
+            break
+    if prefix_ok:
+        score += 40
+
+    extra = max(0, len(t_list) - len(q_list))
+    # Slozitejsi nazvy (vic slov navic) silne dolu — u 50 vysledku na stranu
+    score -= min(extra, 12) * 10
+    # Kratsi titul lehce preferuj
+    score -= min(len(t_list), 12)
+    # Exact (stejny pocet tokenu) = bonus
+    if extra == 0:
+        score += 30
+    return score
+
+
+def _search_sort_key(
+    it: Dict[str, Any],
+    want_year: Optional[int] = None,
+    query: Optional[str] = None,
+):
     """
     v0.0.102: Razeni vysledku hledani - kvalita, rok, CZ dab, cerstvost.
-
-    SD / stare verze stejneho nazvu padnou dolu (Michael 2026 nahoru).
+    v0.0.163: Nejdrive relevance k dotazu (jednoduchy nazev), pak kvalita.
+              Filmy uz neprebijaji seriály jen tim, ze se skládají první.
     """
+    relevance = _search_title_relevance(query or "", it) if query else 0
     quality = int(it.get("quality_score") or 0)
     year = _effective_release_year(it)
     cy = _current_year()
@@ -3456,7 +3774,8 @@ def _search_sort_key(it: Dict[str, Any], want_year: Optional[int] = None):
         year_rank = 1
     dubbed = 1 if it.get("dubbed") else 0
     added = _added_to_ts(it.get("ws_added") or "")
-    return (-quality, -year_rank, -year, -dubbed, -added)
+    # type-neutral: series i movie souperi jen relevanci / kvalitou
+    return (-relevance, -quality, -year_rank, -year, -dubbed, -added)
 
 
 def get_movies(
@@ -4141,75 +4460,110 @@ def _resolve_kids_queries() -> List[str]:
     return [primary] + rest
 
 
-def get_kids(sort: str = "rating", page: int = 1) -> Tuple[List[Dict[str, Any]], bool]:
+def get_kids(sort: str = "rating", page: int = 1,
+              tag: str = "") -> Tuple[List[Dict[str, Any]], bool]:
     """
     Pohádky CZ/SK – vrací (items, has_more).
 
-    NOVÝ MODEL (v0.0.27):
-    Hledá se POUZE v curated seznamu českých/slovenských pohádek
-    (czech_fairy_tales.CZECH_FAIRY_TALES). Pro každý titul ze seznamu
-    proběhne 1 fulltext search na Webshare:
-      - Pokud WS najde aspoň 1 soubor → položka se přidá do rubriky.
-      - Pokud WS nenajde nic → titul přeskočíme.
-
-    Tím se rubrika čistě obsahuje JEN české/slovenské pohádky které
-    máme dostupné. Žádné anglické filmy s podobným slovem, žádné
-    seriály, žádné variace.
-
-    Mapování pro pagination: každá WS "stránka" = N titulů ze seznamu
-    (TITLES_PER_WS_PAGE). To umožní agregaci přes paginate_with_fetcher.
+    Hledá se POUZE v curated seznamu (czech_fairy_tales).
+    tag: christmas|classic|modern|kids|"" (= vše).
     """
-    log.debug("get_kids(sort=%s, ui_page=%s)", sort, page)
+    log.debug("get_kids(sort=%s, ui_page=%s, tag=%r)", sort, page, tag)
 
     from . import czech_fairy_tales as cft
-    fairy_tales = cft.CZECH_FAIRY_TALES
+    fairy_tales = cft.unique_entries(tag or None)
     if not fairy_tales:
         return [], False
 
     sort_mode = _read_sort("sort_kids", SORT_KIDS)
-
-    # 10 titulů na jednu "WS stránku" → pagination si dofetchuje další
     TITLES_PER_WS_PAGE = 10
 
+    def _kids_name_match(title: str, filename: str) -> bool:
+        """Volnější shoda než raw substring — ASCII + tokeny + tečky."""
+        if not title or not filename:
+            return False
+        cleaned = _ct.clean_title(filename) or filename
+
+        def _loose(s: str) -> str:
+            s = _ct.ascii_fold(s or "")
+            s = re.sub(r"[._!,;:'\"()]+", " ", s.lower())
+            return re.sub(r"\s+", " ", s).strip()
+
+        t_loose = _loose(title)
+        n_loose = _loose(filename)
+        if t_loose and t_loose in n_loose:
+            return True
+        if _title_tokens_match(title, cleaned):
+            return True
+        folded = _ct.ascii_fold(title)
+        if folded and folded != title and _title_tokens_match(folded, cleaned):
+            return True
+        # Krátký unikátní titul (Rumcajs) — token musí být ve filename
+        t_tokens = _title_meaningful_tokens(_ct.ascii_fold(title))
+        if len(t_tokens) == 1:
+            only = next(iter(t_tokens))
+            if len(only) >= 5 and only in _loose(cleaned).split():
+                return True
+        return False
+
     def _search_one_title(entry):
-        """v0.0.62: helper pro paralelni WS search per curated titul."""
         if _shutdown.is_shutting_down():
             return None
-        title, year, _tags = entry
+        title, year, tags = entry
+        is_series = "series" in (tags or ())
         try:
-            files = search_videos(query=title, sort="rating", page=1)
+            queries = [title]
+            folded = _ct.ascii_fold(title).strip()
+            if folded and folded.lower() != title.lower():
+                queries.append(folded)
+            files: List[Dict[str, Any]] = []
+            seen: set = set()
+            for q in queries:
+                batch = search_videos(query=q, sort="rating", page=1) or []
+                for f in batch:
+                    ident = f.get("ident") or f.get("id") or ""
+                    if ident and ident not in seen:
+                        seen.add(ident)
+                        files.append(f)
             if not files:
                 return None
-            files = _exclude_series(files)
-            if not files:
-                return None
-            target_norm = _norm_compare(title)
-            matching = [f for f in files
-                        if target_norm in _norm_compare(f.get("name") or "")]
+            # Vícedílné pohádky (Arabela…) — necháme SxxEyy / díl soubory
+            if not is_series:
+                files = _exclude_series(files)
+                if not files:
+                    return None
+            matching = [
+                f for f in files
+                if _kids_name_match(title, f.get("name") or "")
+            ]
             if not matching:
                 return None
-            return (title, year, matching)
+            if is_series:
+                return ("series", title, year, matching)
+            # Preferuj varianty s rokem v názvu, ale nevyhazuj bez roku
+            if year:
+                with_year = [
+                    f for f in matching if str(year) in (f.get("name") or "")
+                ]
+                if with_year:
+                    matching = with_year
+            return ("movie", title, year, matching)
         except Exception as exc:  # noqa: BLE001
             log.debug("kids search %r selhalo: %s", title, exc)
             return None
 
     def _ws_fetch(global_ws_page: int):
-        # Slice seznamu pohádek pro tuto pseudo-WS-stránku
         start = (global_ws_page - 1) * TITLES_PER_WS_PAGE
         end = start + TITLES_PER_WS_PAGE
         slice_titles = fairy_tales[start:end]
         if not slice_titles:
-            log.info("get_kids: seznam pohádek vyčerpán (page=%d)",
-                     global_ws_page)
-            return None  # exhausted
+            log.info("get_kids: seznam pohádek vyčerpán (page=%d tag=%r)",
+                     global_ws_page, tag)
+            return None
 
-        # v0.0.62: PARALELNI WS search - drive 10 sekvencnich requestu
-        # (= 5-10s na Xboxu), ted 5 workeru = ~1-2s.
-        # Webshare unese paralel requesty bez rate limitu.
         ws_workers = min(5, len(slice_titles))
         results: List = []
         try:
-            # v0.0.152: shutdown(wait=False) — Quit neceka na kids WS search
             pool = ThreadPoolExecutor(max_workers=ws_workers,
                                       thread_name_prefix="kids-ws")
             try:
@@ -4227,31 +4581,47 @@ def get_kids(sort: str = "rating", page: int = 1) -> Tuple[List[Dict[str, Any]],
         for res in results:
             if res is None:
                 continue
-            title, year, matching = res
-            # KLÍČOVÁ ZMĚNA (v0.0.29):
-            # NEdělíme matching files podle interpretace názvu ze souboru
-            # (_group_by_title by udělal víc items kvůli variantám
-            # "Pysna princezna 1952" vs "Pysna.princezna.1080p").
-            # Místo toho VYNUTÍME 1 group = 1 item, kde KLÍČ je curated
-            # titul ze seznamu. Všechny matching soubory pak slouží jen
-            # jako varianty kvality pro quality picker.
+            kind, title, year, matching = res
+            if kind == "series":
+                # Složka → sezóny/epizody (stejná cesta jako u seriálů)
+                sub_items = _series_from_groups({title: matching})
+                if not sub_items:
+                    # I bez seskupení stačí folder (epizody se stáhnou až po kliku)
+                    items_out.append({
+                        "id": "",
+                        "title": title,
+                        "year": year,
+                        "plot": "",
+                        "poster": None,
+                        "fanart": None,
+                        "type": "series",
+                        "series_name": title,
+                        "variants_count": len(matching),
+                    })
+                    continue
+                for it in sub_items:
+                    it["title"] = title
+                    it["series_name"] = title
+                    it.pop("base_title", None)
+                    if year:
+                        it["year"] = year
+                    items_out.append(it)
+                continue
+
             single_group = {title: matching}
             sub_items = _movies_from_groups(single_group)
             if not sub_items:
                 continue
-
-            # Před vrácením - vynutit titul a rok ze seznamu (curated data).
             for it in sub_items:
                 it["title"] = title
                 if year:
                     it["year"] = year
                 it["base_title"] = title
                 items_out.append(it)
+        return items_out
 
-        return items_out  # může být [] (žádná pohádka v tomto slice
-                          # nenalezena na WS) - pagination jde dál
-
-    cache_key = f"rubrika:kids_curated:v4:{sort}"
+    tag_key = (tag or "all").strip().lower() or "all"
+    cache_key = f"rubrika:kids_curated:v7:{sort}:{tag_key}"
     return _paginate_rubrika(cache_key, _ws_fetch, ui_page=page,
                              sort_mode=sort_mode)
 
@@ -4420,6 +4790,60 @@ def get_latest(
 # 5c) EPIZODY seriálu + QUALITY VARIANTY (pro picker při přehrávání)
 # ---------------------------------------------------------------------------
 
+# Reality / moderní show — nesmí se míchat do klasických pohádek (Návštěvníci…)
+_FAIRY_EP_POLLUTION_RE = re.compile(
+    r"\b("
+    r"reality|survivor|bachelor|voyo|relaci[ea]|sout[eě][zž]|"
+    r"big[\W_]?brother|farm[aá][rř]|love[\W_]?island|pekin|"
+    r"vym[eě]n[eě]n[eě]|prost[rř]eno|masterchef|the[\W_]?voice|"
+    r"superstar|x[\W_]?factor|idol|top[\W_]?model|ulice[\W_]?reality"
+    r")\b",
+    re.I,
+)
+
+
+def _fairy_series_meta(series_name: str) -> Optional[Dict[str, Any]]:
+    """Meta z curated pohádek (rok + strict) / curated episode šablony."""
+    if not series_name:
+        return None
+    try:
+        from . import czech_fairy_tales as cft
+        from . import czech_series_episodes as cse
+    except Exception:  # noqa: BLE001
+        return None
+
+    year: Optional[int] = None
+    is_fairy = False
+    for title, y, tags in cft.unique_entries():
+        if "series" not in (tags or ()):
+            continue
+        if _series_title_match(series_name, title) or _norm_compare(
+                series_name) == _norm_compare(title):
+            year = int(y) if y else None
+            is_fairy = True
+            series_name = title  # kanonický název
+            break
+
+    curated = cse.is_curated(series_name)
+    if not is_fairy and not curated:
+        return None
+    return {
+        "title": series_name,
+        "year": year,
+        "strict": True,
+        "curated": curated,
+    }
+
+
+def _fairy_file_year_ok(filename: str, classic_year: Optional[int]) -> bool:
+    """Rok v WS názvu = často rok uploadu (2022 remux), ne rok vzniku.
+
+    Proto klasické pohádky NEFILTRUJEME podle roku — jinak zmizí skoro
+    všechny moderní ripy Arabela/Návštěvníci/Krkonošské.
+    """
+    return True
+
+
 def _collect_episodes_files(series_name: str,
                             max_pages: int = 5,
                             force_refresh: bool = False) -> List[Dict[str, Any]]:
@@ -4443,7 +4867,21 @@ def _collect_episodes_files(series_name: str,
     if not series_name:
         return []
 
-    cache_key = f"episodes_files:v7:{_norm_compare(series_name)}"
+    fairy = _fairy_series_meta(series_name)
+    strict = bool(fairy and fairy.get("strict"))
+    classic_year = (fairy or {}).get("year")
+    if fairy and fairy.get("title"):
+        series_name = fairy["title"]
+
+    # Curated pohádky: max 5 stran (dřív 8) — méně paralelních urlopen při Quit
+    if strict:
+        max_pages = max(int(max_pages or 5), 5)
+        max_pages = min(max_pages, 5)
+
+    cache_key = (
+        f"episodes_files:v9:{_norm_compare(series_name)}"
+        f":{'s' if strict else 'n'}:{classic_year or 0}"
+    )
     if force_refresh:
         try:
             cache.cache_delete(cache_key)
@@ -4460,41 +4898,50 @@ def _collect_episodes_files(series_name: str,
 
     all_files: List[Dict[str, Any]] = []
 
-    # Vytvoříme seznam queries k vyzkoušení:
-    # 1) Plný název ("Stranger Things")
-    # 2) ASCII bez diakritiky ("Ordinace v růžové zahradě" -> "... ruzove ...")
-    # 3) Bez "The" prefix ("The Witcher" -> "Witcher")
-    # 4) První významné slovo / dvě slova (ne "Ordinace v")
+    # Pro curated pohádky: plný + ASCII + SxxEyy / díl varianty (WS pojmenování
+    # se neshoduje s oficiálními názvy dílů — hledáme podle čísla).
     queries: List[str] = [series_name]
 
     folded = _ct.ascii_fold(series_name).strip()
     if folded and folded.lower() != series_name.lower():
         queries.append(folded)
 
-    no_the = re.sub(r"^the\s+", "", series_name, flags=re.I).strip()
-    if no_the and no_the != series_name:
-        queries.append(no_the)
+    if strict:
+        # Časté WS vzory bez spoléhání na oficiální název dílu
+        for extra in (
+            f"{series_name} S01",
+            f"{folded} S01" if folded else "",
+            f"{series_name} dil",
+            f"{folded} dil" if folded else "",
+            f"{series_name} epizoda",
+        ):
+            extra = (extra or "").strip()
+            if extra and extra not in queries:
+                queries.append(extra)
+    else:
+        no_the = re.sub(r"^the\s+", "", series_name, flags=re.I).strip()
+        if no_the and no_the != series_name:
+            queries.append(no_the)
 
-    words = [w for w in re.split(r"\s+", series_name.strip()) if w]
-    # Přeskoč krátké předložky jako druhé slovo ("Ordinace v" je slabý dotaz)
-    _WEAK_SECOND = frozenset({
-        "v", "ve", "z", "ze", "a", "i", "o", "u", "na", "do", "od", "po",
-        "the", "of", "and", "or", "a", "an",
-    })
-    if len(words) >= 3:
-        if words[1].lower() in _WEAK_SECOND:
-            # "Ordinace v růžové..." -> radši "Ordinace" než "Ordinace v"
-            pass
-        else:
-            two = " ".join(words[:2])
-            if two not in queries:
-                queries.append(two)
-    if len(words) >= 2 and words[0] not in queries:
-        queries.append(words[0])
-    if folded and folded != series_name:
-        fwords = [w for w in re.split(r"\s+", folded.strip()) if w]
-        if fwords and fwords[0] not in queries:
-            queries.append(fwords[0])
+        words = [w for w in re.split(r"\s+", series_name.strip()) if w]
+        # Přeskoč krátké předložky jako druhé slovo ("Ordinace v" je slabý dotaz)
+        _WEAK_SECOND = frozenset({
+            "v", "ve", "z", "ze", "a", "i", "o", "u", "na", "do", "od", "po",
+            "the", "of", "and", "or", "a", "an",
+        })
+        if len(words) >= 3:
+            if words[1].lower() in _WEAK_SECOND:
+                pass
+            else:
+                two = " ".join(words[:2])
+                if two not in queries:
+                    queries.append(two)
+        if len(words) >= 2 and words[0] not in queries:
+            queries.append(words[0])
+        if folded and folded != series_name:
+            fwords = [w for w in re.split(r"\s+", folded.strip()) if w]
+            if fwords and fwords[0] not in queries:
+                queries.append(fwords[0])
 
     # v0.0.68: dva sort modes per query
     # - rating: nejstaženější varianty (staré dily v hi-quality)
@@ -4502,24 +4949,62 @@ def _collect_episodes_files(series_name: str,
     # Tahle kombinace pokryje sirsi spektrum nez puvodni jen "rating".
     sort_modes = ["rating", "recent"]
 
+    max_ep_cap: Optional[int] = None
+    if fairy and fairy.get("curated"):
+        try:
+            from . import czech_series_episodes as cse
+            max_ep_cap = cse.max_episode(series_name, 1)
+        except Exception:  # noqa: BLE001
+            max_ep_cap = None
+
     seen_idents: set = set()
     for qi, q in enumerate(queries):
+        if _shutdown.is_shutting_down():
+            log.info("_collect_episodes_files(%r): abort - koncim queries",
+                     series_name)
+            break
         if not q or len(q) < 2:
             continue
         new_in_this_query = 0
         for sort_mode in sort_modes:
-            log.info("_collect_episodes_files: query[%d]=%r sort=%s (target=%r)",
-                     qi, q, sort_mode, series_name)
+            if _shutdown.is_shutting_down():
+                break
+            log.info("_collect_episodes_files: query[%d]=%r sort=%s (target=%r strict=%s)",
+                     qi, q, sort_mode, series_name, strict)
             for p in range(1, max_pages + 1):
+                if _shutdown.is_shutting_down():
+                    break
                 files = search_videos(query=q, sort=sort_mode, page=p)
                 if not files:
                     break
                 added = 0
                 for f in files:
                     name = f.get("name") or ""
+                    if strict and _FAIRY_EP_POLLUTION_RE.search(name):
+                        continue
+                    if strict and not _fairy_file_year_ok(name, classic_year):
+                        continue
+
                     s, e = _parse_episode(name, series_name)
                     if s is None or e is None:
+                        # Curated: zkus párování podle názvu dílu ve filename
+                        if fairy and fairy.get("curated"):
+                            try:
+                                from . import czech_series_episodes as cse
+                                hit = cse.match_filename_to_episode(
+                                    series_name, name)
+                            except Exception:  # noqa: BLE001
+                                hit = None
+                            if hit:
+                                s, e = hit
+                            else:
+                                continue
+                        else:
+                            continue
+
+                    if max_ep_cap and int(e) > int(max_ep_cap) and int(s) == 1:
                         continue
+
                     ident = f.get("ident") or ""
                     if ident in seen_idents:
                         continue
@@ -4534,8 +5019,31 @@ def _collect_episodes_files(series_name: str,
                                 flags=re.I,
                             )[0],
                         ) or _series_name(name)
-                    if not _series_title_match_for_episodes(series_name, detected):
+
+                    if strict:
+                        # Striktní shoda — žádný Voyo/fuzzy spillover
+                        ok = _series_title_match(series_name, detected)
+                        if not ok:
+                            ok_by_ep_title = False
+                            if fairy and fairy.get("curated"):
+                                try:
+                                    from . import czech_series_episodes as cse
+                                    ok_by_ep_title = (
+                                        cse.match_filename_to_episode(
+                                            series_name, name) is not None)
+                                except Exception:  # noqa: BLE001
+                                    ok_by_ep_title = False
+                            ok = ok_by_ep_title or _kids_title_in_name(
+                                series_name, name)
+                        if not ok:
+                            continue
+                    elif not _series_title_match_for_episodes(series_name, detected):
                         continue
+
+                    # Ulož parsované S/E na soubor (pro get_series_episodes)
+                    f = dict(f)
+                    f["_ep_season"] = int(s)
+                    f["_ep_number"] = int(e)
                     all_files.append(f)
                     seen_idents.add(ident)
                     added += 1
@@ -4547,9 +5055,78 @@ def _collect_episodes_files(series_name: str,
         # Pokud první query (= plný název) nevrátil nic, zkusíme další.
         # Pokud první VRÁTIL něco, ale ne moc, taky pokračujeme - širší query
         # může přinést další ripy se stejnou epizodou v jiné kvalitě.
-        if qi == 0 and len(all_files) >= 30:
+        if qi == 0 and not strict and len(all_files) >= 30:
             # Máme dost - nemusíme zkoušet další (širší) queries.
             break
+        if strict and max_ep_cap:
+            found_n = len({
+                int(f["_ep_number"])
+                for f in all_files
+                if f.get("_ep_season") == 1 and f.get("_ep_number") is not None
+            })
+            if found_n >= int(max_ep_cap):
+                break
+
+    # Doplň chybějící čísla dílů — max pár cílených dotazů (ne 15×6 = hang Quit)
+    if (
+        fairy and fairy.get("curated") and max_ep_cap
+        and not _shutdown.is_shutting_down()
+    ):
+        found_eps = {
+            int(f["_ep_number"])
+            for f in all_files
+            if f.get("_ep_season") == 1 and f.get("_ep_number") is not None
+        }
+        missing = [e for e in range(1, int(max_ep_cap) + 1) if e not in found_eps]
+        # Max 5 chybějících, max 2 query varianty — jinak desítky urlopen při Quit
+        missing = missing[:5]
+        if missing:
+            log.info("_collect_episodes_files(%r): chybi dily %s — cilene hledam",
+                     series_name, missing)
+            fold_q = folded or _ct.ascii_fold(series_name).strip() or series_name
+            for ep in missing:
+                if _shutdown.is_shutting_down():
+                    break
+                hit_any = False
+                for q in (
+                    f"{series_name} S01E{ep:02d}",
+                    f"{fold_q} dil {ep}",
+                ):
+                    if _shutdown.is_shutting_down():
+                        break
+                    files = search_videos(query=q, sort="rating", page=1) or []
+                    for f in files:
+                        name = f.get("name") or ""
+                        if _FAIRY_EP_POLLUTION_RE.search(name):
+                            continue
+                        if not _kids_title_in_name(series_name, name):
+                            continue
+                        s, e = _parse_episode(name, series_name)
+                        if s is None or e is None:
+                            if re.search(
+                                rf"(?:S0?1[\W_]*E0?{ep}|E0?{ep}|d[ií]l[\W_]*0?{ep})"
+                                rf"|(?:^|[\W_])0?{ep}(?:[\W_]|$)",
+                                name,
+                                re.I,
+                            ):
+                                s, e = 1, ep
+                            else:
+                                continue
+                        if int(e) != int(ep):
+                            continue
+                        if max_ep_cap and int(e) > int(max_ep_cap):
+                            continue
+                        ident = f.get("ident") or ""
+                        if not ident or ident in seen_idents:
+                            continue
+                        f = dict(f)
+                        f["_ep_season"] = 1
+                        f["_ep_number"] = int(ep)
+                        all_files.append(f)
+                        seen_idents.add(ident)
+                        hit_any = True
+                    if hit_any:
+                        break
 
     log.info("_collect_episodes_files(%r): celkem %d souboru po vsech queries",
              series_name, len(all_files))
@@ -4563,6 +5140,18 @@ def _collect_episodes_files(series_name: str,
         except Exception as exc:  # noqa: BLE001
             log.debug("cache_delete empty %s: %s", cache_key, exc)
     return all_files
+
+
+def _kids_title_in_name(title: str, filename: str) -> bool:
+    """ASCII substring / token shoda názvu seriálu ve filename."""
+    if not title or not filename:
+        return False
+    t = _ct.ascii_fold(title).lower().strip()
+    n = _ct.ascii_fold(filename).lower()
+    n = re.sub(r"[._]+", " ", n)
+    if t and t in n:
+        return True
+    return _title_tokens_match(title, _ct.clean_title(filename) or filename)
 
 
 def _parse_se(name: str) -> Tuple[Optional[int], Optional[int]]:
@@ -4697,14 +5286,35 @@ def get_series_seasons(series_name: str,
     if not series_name:
         return {"seasons": []}
 
-    seasons_cache_key = f"series_seasons:{_norm_compare(series_name)}"
+    fairy = _fairy_series_meta(series_name)
+    if fairy and fairy.get("title"):
+        series_name = fairy["title"]
+    classic_year = (fairy or {}).get("year")
+    curated_map = None
+    if fairy and fairy.get("curated"):
+        try:
+            from . import czech_series_episodes as cse
+            curated_map = cse.episode_map(series_name)
+        except Exception:  # noqa: BLE001
+            curated_map = None
+
+    seasons_cache_key = (
+        f"series_seasons:v2:{_norm_compare(series_name)}:y{classic_year or 0}"
+    )
     if force_refresh:
         # Smaze seasons cache + vsechny per-season eps caches pro tento seriál.
         try:
             cache.cache_delete(seasons_cache_key)
-            # series_eps:{norm}:s1, s2, ... + sNone (flat fallback)
             cache.cache_clear_prefix(
                 f"series_eps:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"series_eps:v2:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"series_eps:v3:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v9:{_norm_compare(series_name)}")
+            cache.cache_clear_prefix(
+                f"episodes_files:v8:{_norm_compare(series_name)}")
         except Exception as exc:  # noqa: BLE001
             log.debug("cache cleanup %s: %s", seasons_cache_key, exc)
     else:
@@ -4718,14 +5328,23 @@ def get_series_seasons(series_name: str,
     ws_season_counts: Dict[int, int] = {}
     ws_episodes_per_season: Dict[int, set] = {}
     for f in files:
-        s, e = _parse_episode(f.get("name") or "", series_name)
-        if s is None:
+        if f.get("_ep_season") is not None and f.get("_ep_number") is not None:
+            try:
+                s, e = int(f["_ep_season"]), int(f["_ep_number"])
+            except (TypeError, ValueError):
+                s, e = _parse_episode(f.get("name") or "", series_name)
+        else:
+            s, e = _parse_episode(f.get("name") or "", series_name)
+        if s is None or e is None:
             continue
-        ws_episodes_per_season.setdefault(s, set()).add(e)
+        if curated_map is not None:
+            if int(s) not in curated_map or int(e) not in curated_map.get(int(s), {}):
+                continue
+        ws_episodes_per_season.setdefault(int(s), set()).add(int(e))
     for s, eps in ws_episodes_per_season.items():
         ws_season_counts[s] = len(eps)
 
-    # 2) TMDB - najdi seriál a dotáhni seasons
+    # 2) TMDB - najdi seriál (preferuj rok klasiky) a dotáhni seasons
     tmdb_id = None
     tmdb_title = series_name
     tmdb_poster = ""
@@ -4734,15 +5353,31 @@ def get_series_seasons(series_name: str,
     tmdb_seasons: List[Dict[str, Any]] = []
     try:
         from . import tmdb_tv_api
-        meta = tmdb_tv_api.tmdb_lookup_tv_first(series_name)
+        candidates = tmdb_tv_api.tmdb_lookup_tv(series_name) or []
+        meta = None
+        if classic_year and candidates:
+            for c in candidates:
+                cy = c.get("year")
+                try:
+                    if cy is not None and abs(int(cy) - int(classic_year)) <= 2:
+                        meta = c
+                        break
+                except (TypeError, ValueError):
+                    pass
+        if meta is None and candidates:
+            meta = candidates[0]
         if meta:
             tmdb_id = meta.get("tmdb_id")
             tmdb_title = meta.get("title") or series_name
             tmdb_poster = meta.get("poster") or ""
             tmdb_fanart = meta.get("fanart") or ""
             tmdb_plot = meta.get("plot") or ""
-        if tmdb_id:
+        if tmdb_id and curated_map is None:
+            # U curated pohádek neber TMDB počty (často 40+ z jiné verze)
             tmdb_seasons = tmdb_tv_api.get_seasons(tmdb_id)
+        elif tmdb_id:
+            # Poster/plot ano, seasons si sestavíme ze šablony
+            pass
     except Exception as exc:  # noqa: BLE001
         log.debug("get_series_seasons: TMDB lookup selhal: %s", exc)
 
@@ -4750,16 +5385,28 @@ def get_series_seasons(series_name: str,
     tmdb_seasons_map = {int(s.get("season_number")): s for s in tmdb_seasons}
 
     seasons_out: List[Dict[str, Any]] = []
-    all_season_nums = sorted(set(list(ws_season_counts.keys()) +
-                                 list(tmdb_seasons_map.keys())))
+    if curated_map is not None:
+        all_season_nums = sorted(curated_map.keys())
+    else:
+        all_season_nums = sorted(set(list(ws_season_counts.keys()) +
+                                     list(tmdb_seasons_map.keys())))
     for num in all_season_nums:
         if num == 0:
             continue
         ws_count = ws_season_counts.get(num, 0)
         tm = tmdb_seasons_map.get(num) or {}
-        # Přeskočit jen pokud nemáme z TMDB ani WS opravdu NIC.
-        # (Dřív jsme přeskakovali i ws_count==0, takže pokud Webshare nedal
-        # nic, neviděl user ŽÁDNÉ sezóny - ani ty co TMDB znalo.)
+        if curated_map is not None:
+            expected = len(curated_map.get(num) or {})
+            seasons_out.append({
+                "season_number":      num,
+                "name":               tm.get("name") or f"Sezóna {num}",
+                "overview":           tm.get("overview") or "",
+                "ws_episode_count":   ws_count,
+                "tmdb_episode_count": expected,  # šablona, ne falešných 40 z TMDB
+                "poster":             tm.get("poster") or tmdb_poster,
+                "air_date":           tm.get("air_date") or "",
+            })
+            continue
         if ws_count == 0 and not tm:
             continue
         seasons_out.append({
@@ -4804,8 +5451,16 @@ def get_series_episodes(series_name: str,
     if not series_name:
         return []
 
+    fairy = _fairy_series_meta(series_name)
+    if fairy and fairy.get("title"):
+        series_name = fairy["title"]
+    classic_year = (fairy or {}).get("year")
+
     # CACHE 30 min - klik na sezónu pak nečeká na enrich epizod znovu
-    ep_cache_key = f"series_eps:{_norm_compare(series_name)}:s{season}"
+    ep_cache_key = (
+        f"series_eps:v3:{_norm_compare(series_name)}:s{season}"
+        f":y{classic_year or 0}"
+    )
     if force_refresh:
         try:
             cache.cache_delete(ep_cache_key)
@@ -4822,26 +5477,71 @@ def get_series_episodes(series_name: str,
     if not files:
         return []
 
+    def _file_se(f: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
+        if f.get("_ep_season") is not None and f.get("_ep_number") is not None:
+            try:
+                return int(f["_ep_season"]), int(f["_ep_number"])
+            except (TypeError, ValueError):
+                pass
+        name = f.get("name") or ""
+        s, e = _parse_episode(name, series_name)
+        if s is not None and e is not None:
+            return s, e
+        if fairy and fairy.get("curated"):
+            try:
+                from . import czech_series_episodes as cse
+                hit = cse.match_filename_to_episode(series_name, name)
+                if hit:
+                    return hit
+            except Exception:  # noqa: BLE001
+                pass
+        return None, None
+
     # Filter sezóny pokud requested
     if season is not None:
         season_int = int(season)
-        files = [f for f in files
-                 if _parse_episode(f.get("name") or "", series_name)[0] == season_int]
+        files = [f for f in files if _file_se(f)[0] == season_int]
+
+    # Curated šablona — jen známé díly (žádný garbage E99 z reality)
+    curated_map = None
+    if fairy and fairy.get("curated"):
+        try:
+            from . import czech_series_episodes as cse
+            curated_map = cse.episode_map(series_name)
+        except Exception:  # noqa: BLE001
+            curated_map = None
 
     # Seskup podle SxxEyy klíče
     by_ep: Dict[str, List[Dict[str, Any]]] = {}
     for f in files:
-        s, e = _parse_episode(f.get("name") or "", series_name)
+        s, e = _file_se(f)
         if s is None or e is None:
             continue
+        if curated_map is not None:
+            if int(s) not in curated_map or int(e) not in curated_map.get(int(s), {}):
+                continue
         ep_key = f"S{s:02d}E{e:02d}"
         by_ep.setdefault(ep_key, []).append(f)
 
-    # TMDB lookup seriálu pro enrichment epizod
+    # TMDB lookup — s preferencí roku z curated seznamu
     tmdb_id = None
     try:
         from . import tmdb_tv_api
-        meta = tmdb_tv_api.tmdb_lookup_tv_first(series_name)
+        candidates = tmdb_tv_api.tmdb_lookup_tv(series_name) or []
+        meta = None
+        if classic_year and candidates:
+            for c in candidates:
+                cy = c.get("year")
+                if cy is None:
+                    continue
+                try:
+                    if abs(int(cy) - int(classic_year)) <= 2:
+                        meta = c
+                        break
+                except (TypeError, ValueError):
+                    pass
+        if meta is None and candidates:
+            meta = candidates[0]
         if meta:
             tmdb_id = meta.get("tmdb_id")
     except Exception as exc:  # noqa: BLE001
@@ -4856,7 +5556,9 @@ def get_series_episodes(series_name: str,
         best = variants[0]
         is_dubbed = any(_detect_dubbed(v.get("name") or "") for v in variants)
         fname = best.get("name") or ""
-        s_num, e_num = _parse_episode(fname, series_name)
+        s_num, e_num = _file_se(fs[0])
+        if s_num is None:
+            s_num, e_num = _parse_episode(fname, series_name)
         base = _episode_base_for_series(series_name, s_num or 1, e_num or 1, fname)
 
         _save_variants_cache(base, "episode", variants)
@@ -4865,7 +5567,7 @@ def get_series_episodes(series_name: str,
             "id": "",
             "title": ep_key,
             "title_raw": ep_key,
-            "year": None,
+            "year": classic_year,
             "plot": f"{series_name} - {ep_key}. Dostupné varianty: {len(variants)}.",
             "poster": "",
             "fanart": "",
@@ -4880,13 +5582,23 @@ def get_series_episodes(series_name: str,
             "episode_number": e_num,
         }
 
-        # Enrich z TMDB
+        # 1) Curated CSFD-style názvy (priorita pro CZ pohádky)
+        curated_title = None
+        if curated_map is not None and s_num is not None and e_num is not None:
+            curated_title = (curated_map.get(int(s_num)) or {}).get(int(e_num))
+            if curated_title:
+                item["episode_title"] = curated_title
+                item["title"] = f"{ep_key} - {curated_title}"
+
+        # 2) Enrich z TMDB (plot/still; název jen když curated chybí)
         if tmdb_id and s_num is not None and e_num is not None:
             try:
                 from . import tmdb_tv_api
                 tmdb_tv_api.enrich_episode(item, tmdb_id, s_num, e_num)
-                if item.get("episode_title"):
-                    # Zobrazit "S01E02 - Jméno epizody"
+                if curated_title:
+                    item["episode_title"] = curated_title
+                    item["title"] = f"{ep_key} - {curated_title}"
+                elif item.get("episode_title"):
                     item["title"] = f"{ep_key} - {item['episode_title']}"
             except Exception as exc:  # noqa: BLE001
                 log.debug("episode enrich %s selhal: %s", ep_key, exc)
@@ -5358,9 +6070,8 @@ def _build_rubric_search_queries(
     """
     v0.0.100: Sestavi WS dotazy pro hledani v rubrice.
 
-    U kratkych nazvu (Michael) davame rok NA PRVNI MISTO - bare query
-    jinak zaplavi vysledky jinymi 'Michael' a pagination dedup je pak
-  nevrati.
+    v0.0.138: Bez roku jde bare q prvni (stejne jako hlavni search).
+    U kratkych nazvu s ROKem davame rok na prvni misto.
     """
     q = (q or "").strip()
     if not q:
@@ -5374,20 +6085,19 @@ def _build_rubric_search_queries(
             seen.add(k)
             out.append(s.strip())
 
-    cy = _current_year()
     if search_year:
         _add(f"{q} {search_year}")
         _add(f"{q} {search_year} CZ")
         _add(f"{q} {search_year} dabing")
-    elif " " not in q and len(q) >= 3:
-        _add(f"{q} {cy}")
-        _add(f"{q} {cy} CZ")
-        _add(f"{q} {cy} dabing")
-        _add(f"{q} {cy - 1}")
     _add(q)
     if extras:
         for e in extras:
             _add(e)
+    if not search_year and " " not in q and len(q) >= 3:
+        cy = _current_year()
+        _add(f"{q} {cy}")
+        _add(f"{q} {cy} CZ")
+        _add(f"{q} {cy - 1}")
     return out
 
 
@@ -5397,34 +6107,83 @@ def _file_matches_search_title(
     """
     Shoda dotazu s nazvem souboru.
 
-    v0.0.103: U WS vysledku akceptuj i cele slovo v raw nazvu (scene tagy
-    v clean_title jinak rozbiji striktni token match).
+    v0.0.138: Jednoslovne franchise ("Hobit", "Avengers") musi projit —
+    drive se akceptoval jen exact token set / max 1 extra slovo, takze
+    "Hobit Neocekavana cesta" padalo a ve vysledcich zustal bordel z
+    "Hobit 2026" WS dotazu.
+
+    Stale odmita "Michael Jordan" pri dotazu "Michael" (osoba vs film).
+    Soft match: hobit ≈ hobbit (CZ/EN).
     """
-    q_tokens = _title_meaningful_tokens(query)
-    if not q_tokens:
+    q_list = _title_meaningful_token_list(query)
+    if not q_list:
         return False
+    q_tokens = set(q_list)
     norm = _normalize_title(fname)
     fname_l = (fname or "").lower()
+    cand_list = _title_meaningful_token_list(norm or fname)
+    cand_tokens = set(cand_list)
     matched = False
-    if norm:
-        if len(q_tokens) == 1:
-            if _title_tokens_match(query, norm):
+
+    if cand_tokens:
+        # Vicoslovny dotaz: vsechny tokeny musi byt v nazvu.
+        if len(q_list) > 1:
+            if q_tokens.issubset(cand_tokens):
                 matched = True
-            elif _title_meaningful_tokens(norm) == q_tokens:
-                matched = True
-        elif q_tokens.issubset(_title_meaningful_tokens(norm)):
-            matched = True
-    if not matched and len(q_tokens) == 1:
-        qword = list(q_tokens)[0]
-        if re.search(rf"(?<![\w]){re.escape(qword)}(?![\w])", fname_l):
-            cand = _title_meaningful_tokens(norm) if norm else set()
-            extra = cand - q_tokens
-            if not extra or extra == q_tokens:
-                matched = True
-            elif len(extra) == 1 and list(extra)[0] not in (
-                "jordan", "george", "jackson", "collins", "myers",
+            elif all(
+                any(_token_soft_eq(qt, ct) for ct in cand_tokens)
+                for qt in q_list
             ):
                 matched = True
+        else:
+            qt = q_list[0]
+            # Presna shoda tokenu (Michael == Michael 2026 BluRay).
+            if _title_tokens_match(query, norm or fname):
+                matched = True
+            else:
+                primary = [t for t in cand_list if t not in _SEARCH_STOPWORDS]
+                first = primary[0] if primary else ""
+                # Franchise: dotaz = prvni vyznamne slovo nazvu
+                # (Hobit Neocekavana cesta, The Hobbit An Unexpected…).
+                if first and _token_soft_eq(qt, first):
+                    # Odmítni Firstname Surname… (Michael Jordan [documentary])
+                    if (
+                        len(primary) >= 2
+                        and primary[1] in _SEARCH_PERSON_EXTRA
+                    ):
+                        matched = False
+                    else:
+                        matched = True
+                # Dotaz je v nazvu jako cele slovo + malo navic
+                # (stary fallback, prísnejsi blacklist).
+                elif qt in cand_tokens or any(
+                    _token_soft_eq(qt, ct) for ct in cand_tokens
+                ):
+                    extra = cand_tokens - q_tokens
+                    # soft: vyhod i soft-shodny token z extra
+                    extra = {
+                        e for e in extra
+                        if not _token_soft_eq(qt, e)
+                    }
+                    if not extra:
+                        matched = True
+                    elif (
+                        len(extra) == 1
+                        and list(extra)[0] not in _SEARCH_PERSON_EXTRA
+                    ):
+                        matched = True
+
+    if not matched and len(q_list) == 1:
+        qword = q_list[0]
+        if re.search(rf"(?<![\w]){re.escape(qword)}(?![\w])", fname_l):
+            primary = [t for t in cand_list if t not in _SEARCH_STOPWORDS]
+            if primary and _token_soft_eq(qword, primary[0]):
+                if not (
+                    len(primary) >= 2
+                    and primary[1] in _SEARCH_PERSON_EXTRA
+                ):
+                    matched = True
+
     if not matched:
         return False
     if year:
@@ -5459,7 +6218,9 @@ def _search_alt_queries(query: str, year: Optional[int] = None) -> List[str]:
     """
     Bilingvni vyhledavani: vrati seznam dotazu k odeslani na Webshare.
 
-    v0.0.100: rokove varianty NA PRVNI MISTO (Michael 2026 pred bare Michael).
+    v0.0.138: Bez roku jde BARE dotaz prvni (Hobit, Avengers). Drive se
+    u jednoslovnych nejdřív hledalo "{q} 2026", coz vracelo nesouvisejici
+    bordel a uzivatelsky titul se v prvních stránkách neobjevil.
     """
     q = (query or "").strip()
     if not q:
@@ -5473,17 +6234,14 @@ def _search_alt_queries(query: str, year: Optional[int] = None) -> List[str]:
             seen.add(k)
             out.append(s.strip())
 
-    cy = _current_year()
+    # 1) Uzivatelsky dotaz (pripadne s rokem) — vzdy priorita.
     if year:
         _add(f"{q} {year}")
         _add(f"{q} {year} CZ")
         _add(f"{q} {year} dabing")
-    elif " " not in q and len(q) >= 3:
-        _add(f"{q} {cy}")
-        _add(f"{q} {cy} CZ")
-        _add(f"{q} {cy} dabing")
-        _add(f"{q} {cy - 1}")
     _add(q)
+
+    # 2) TMDB original / localized — film i seriál (nejen movie first).
     try:
         from . import tmdb
         meta = tmdb.search_movie(q, year=year)
@@ -5499,8 +6257,27 @@ def _search_alt_queries(query: str, year: Optional[int] = None) -> List[str]:
                 if year:
                     _add(f"{loc} {year}")
                 _add(loc)
+        meta_tv = tmdb.search_tv(q)
+        if meta_tv:
+            orig_tv = (meta_tv.get("original_name")
+                       or meta_tv.get("original_title") or "").strip()
+            loc_tv = (meta_tv.get("name")
+                      or meta_tv.get("title_localized")
+                      or meta_tv.get("title") or "").strip()
+            if orig_tv:
+                _add(orig_tv)
+            if loc_tv and loc_tv.lower() != (orig_tv or "").lower():
+                _add(loc_tv)
     except Exception as exc:  # noqa: BLE001
         log.debug("_search_alt_queries TMDB lookup selhal: %s", exc)
+
+    # 3) Roke hinty az nakonec (jen bez explicitniho roku, kratky nazev).
+    if not year and " " not in q and len(q) >= 3:
+        cy = _current_year()
+        _add(f"{q} {cy}")
+        _add(f"{q} {cy} CZ")
+        _add(f"{q} {cy - 1}")
+
     log.debug("_search_alt_queries(%r, year=%s) -> %s", query, year, out)
     return out
 
@@ -5562,9 +6339,12 @@ def search(
         movies_files: List[Dict[str, Any]] = []
         series_files: List[Dict[str, Any]] = []
         for f in raw:
-            if _is_series_file(f.get("name") or ""):
+            name = f.get("name") or ""
+            if not _file_matches_search_title(name, query, year=year):
+                continue
+            if _is_series_file(name):
                 series_files.append(f)
-            elif _file_matches_search_title(f.get("name") or "", query, year=year):
+            else:
                 movies_files.append(f)
 
         movie_items = (
@@ -5577,16 +6357,21 @@ def search(
             _series_from_groups(_group_by_series(series_files))
             if series_files else []
         )
-        items = movie_items + series_items
+        # Neskládat filmy před seriály — globální sort podle relevance.
+        items = list(movie_items) + list(series_items)
         if year:
             items = _filter_search_by_year(items, year)
         return items
 
     norm = re.sub(r"\s+", " ", (query or "").strip().lower())
-    cache_key = f"rubrika:search:v8:{norm}:y{year or 0}"
+    cache_key = f"rubrika:search:v9:{norm}:y{year or 0}"
 
-    max_ws = 8 if year or len(query.split()) == 1 else 3
-    sort_key = lambda it: _search_sort_key(it, want_year=year)
+    # Vic WS stranek i u víceslovných — naplnit 50 položek relevantními
+    max_ws = 8 if year or len(query.split()) <= 2 else 5
+    q_for_sort = query
+    sort_key = lambda it: _search_sort_key(
+        it, want_year=year, query=q_for_sort,
+    )
     return _paginate_rubrika(
         cache_key, _ws_fetch, ui_page=page,
         poster_first=False,
