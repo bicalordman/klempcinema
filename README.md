@@ -169,21 +169,22 @@ Autor: **Bicalorman**
 
 ## Změny
 
-### Souhrn 0.0.159 → 0.0.163
+### Souhrn 0.0.153 → 0.0.163
 
 | Oblast | Hlavní změny |
 |--------|----------------|
-| Hledání | Franchise (Hobit…) zase najdou správné díly; nahoře jednoduchý název blízky dotazu, ne jen 4K/filmy |
+| Hledání | Oprava franchise (Hobit…); nahoře jednoduchý název blízky dotazu, ne jen 4K/filmy |
 | Pohádky | Večerníček / TV: doplněna klasika (Broučci, Mach a Šebestová, Pojďte pane…) |
 | Picker kvality | Lepší značení jazyka; u `[?]` zkusí Language ze streamu (MKV) |
+| TV program | CSFD/TMDB plakáty, lepší Webshare match, slovenské stanice (webtv.sk) — od 0.0.153 |
 
-### Souhrn 0.0.137 → 0.0.153
+### Souhrn 0.0.137 → 0.0.152
 
 | Oblast | Hlavní změny |
 |--------|----------------|
 | Platformy | Jen předplatné (flatrate), region CZ/SK, žánry uvnitř platforem, loga Netflix/HBO/… |
 | Menu | Vlastní bílé pictogramy u rubrik; výchozí **Seznam**, po přepnutí Kodi volbu pamatuje |
-| TV program | Ikony kanálů, CSFD/TMDB plakáty, lepší Webshare match, slovenské stanice (webtv.sk) |
+| TV program | Ikony kanálů, skrytí prázdných/sportovních |
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
