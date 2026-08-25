@@ -20,8 +20,8 @@ function New-KodiAddonZip {
         [string]$SrcRoot,
         [string]$AddonId,
         [string]$OutZip,
-        [string[]]$ExcludeDir = @('__pycache__', '.git', '.cursor', 'tests', 'docs', 'repository.klempcinema'),
-        [string[]]$ExcludeFile = @('*.zip', 'build_zip.ps1', 'build_repo.ps1', 'run_tests.ps1', 'fanart_old.jpg', 'icon_old.png')
+        [string[]]$ExcludeDir = @('__pycache__', '.git', '.cursor', '.venv', '.pytest_cache', '.aimonster', 'tests', 'docs', 'repository.klempcinema'),
+        [string[]]$ExcludeFile = @('*.zip', 'build_zip.ps1', 'build_repo.ps1', 'run_tests.ps1', 'fanart_old.jpg', 'icon_old.png', 'diagnose_output.txt')
     )
 
     if (Test-Path $OutZip) { Remove-Item $OutZip -Force }

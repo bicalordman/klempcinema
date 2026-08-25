@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.164**
+**Aktuální verze: 0.0.165**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.164.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.165.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -169,10 +169,11 @@ Autor: **Bicalorman**
 
 ## Změny
 
-### Souhrn 0.0.153 → 0.0.164
+### Souhrn 0.0.153 → 0.0.165
 
 | Oblast | Hlavní změny |
 |--------|----------------|
+| Instalace | v0.0.165: čistý ZIP bez `.venv` (rychlejší repo / start) |
 | Seriály | Hledání v rubrice; lepší kvalita epizod; CZ+EN názvy do sezón; Ordinace „díly“ po 50 |
 | Hledání | Oprava franchise (Hobit…); nahoře jednoduchý název blízky dotazu, ne jen 4K/filmy |
 | Pohádky | Večerníček / TV: doplněna klasika (Broučci, Mach a Šebestová, Pojďte pane…) |
@@ -189,6 +190,10 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.165 — Čistý ZIP (oprava instalace)
+
+- Z buildu vyřazeno `.venv` / `.aimonster` / diagnostika — Kodi repo se znovu načítá rychle
 
 ### v0.0.164 — Seriály: hledání, kvalita, CZ+EN, díly
 
