@@ -55,6 +55,7 @@ import threading
 import time
 import zlib
 from html import unescape
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -748,10 +749,127 @@ def _release_bg_process_lock() -> None:
         pass
 
 
+def _merge_poster_fields(
+    dest: Dict[str, Any], src: Dict[str, Any]
+) -> None:
+    """Doplni do dest plakaty/meta z src (in-place)."""
+    for key in (
+        "tmdb_poster", "tmdb_fanart", "tmdb_year", "tmdb_plot",
+        "tmdb_title", "tmdb_original", "tmdb_id", "tmdb_rating",
+        "csfd_poster", "csfd_plot", "csfd_title", "csfd_rating",
+        "csfd_rating_pct", "csfd_url", "year",
+    ):
+        if src.get(key) and not dest.get(key):
+            dest[key] = src[key]
+        elif key in ("tmdb_poster", "csfd_poster", "tmdb_fanart") and src.get(key):
+            # Plakat z enrichu ma prednost pred prazdnym / starsim.
+            if not dest.get(key):
+                dest[key] = src[key]
+
+
+def _merge_enriched_into_cache(enriched: List[Dict[str, Any]]) -> None:
+    """Zapise plakaty zet enrichnutych polozek zpet do BASE/FULL cache."""
+    if not enriched:
+        return
+    by_key = {_tv_item_dedup_key(it): it for it in enriched}
+
+    def _apply(stored: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+        if not stored:
+            return None
+        changed = False
+        for it in stored:
+            src = by_key.get(_tv_item_dedup_key(it))
+            if not src:
+                continue
+            before = (
+                it.get("tmdb_poster"), it.get("csfd_poster"), it.get("tmdb_id")
+            )
+            _merge_poster_fields(it, src)
+            after = (
+                it.get("tmdb_poster"), it.get("csfd_poster"), it.get("tmdb_id")
+            )
+            if after != before:
+                changed = True
+        return stored if changed else None
+
+    try:
+        full = cache.cache_get(TV_CACHE_KEY, ttl=TV_CACHE_TTL)
+        updated_full = _apply(list(full) if full else None)
+        if updated_full is not None:
+            cache.cache_set(TV_CACHE_KEY, updated_full)
+        base = cache.cache_get(TV_CACHE_KEY_BASE, ttl=TV_CACHE_TTL)
+        updated_base = _apply(list(base) if base else None)
+        if updated_base is not None:
+            cache.cache_set(TV_CACHE_KEY_BASE, updated_base)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("tv_program: merge enrich do cache selhal: %s", exc)
+
+
+def enrich_for_display(
+    items: List[Dict[str, Any]],
+    *,
+    max_wait_sec: float = 4.0,
+    csfd_max_wait_sec: float = 3.0,
+    max_items: int = 40,
+) -> List[Dict[str, Any]]:
+    """Sync enrich pro prave zobrazovanou stranku (Kodi request = jeden process).
+
+    BG thread casto umre s koncem plugin.py — plakaty proto doplnime tady,
+    jen pro predane polozky (typicky 1 stranka ~40).
+    """
+    if not items:
+        return items
+    need = [
+        it for it in items
+        if not (it.get("tmdb_poster") or it.get("csfd_poster"))
+        and it.get("kind") in ("film", "series", "documentary", "entertainment")
+        and not it.get("is_past")
+    ]
+    if not need:
+        return items
+    try:
+        # Stejne dict objekty jako v items — in-place update staci.
+        _enrich_with_tmdb_posters(
+            need,
+            max_wait_sec=max_wait_sec,
+            csfd_fallback=True,
+            max_items=min(len(need), max_items),
+            csfd_max_wait_sec=csfd_max_wait_sec,
+        )
+        _merge_enriched_into_cache(need)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("tv_program enrich_for_display selhal: %s", exc)
+    return items
+
+
 def _build_full_program(base_items: List[Dict[str, Any]],
                         *, bg_mode: bool = False) -> List[Dict[str, Any]]:
-    """Slouci zaklad + premium kanaly + SK + TMDB/CSFD enrich."""
+    """Slouci zaklad + premium kanaly + SK + TMDB/CSFD enrich.
+
+    bg_mode: nejdriv enrich+uloz BASE (plakaty), pak teprve premium/SK —
+    kdyz Kodi ukonci process uprostred premium fetch, plakaty uz jsou v cache.
+    """
     items = _strip_premium_channels_from_base(base_items)
+
+    if bg_mode:
+        # Faze A: plakaty na zakladnich polozkach → hned do BASE cache.
+        try:
+            _enrich_with_tmdb_posters(
+                items,
+                max_wait_sec=12.0,
+                csfd_fallback=True,
+                max_items=100,
+                csfd_max_wait_sec=8.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("tv_program TMDB enrich (faze A) selhal: %s", exc)
+        try:
+            cache.cache_set(TV_CACHE_KEY_BASE, list(items))
+            log.info("tv_program: BG faze A — BASE s plakaty ulozen (%d)",
+                     len(items))
+        except Exception as exc:  # noqa: BLE001
+            log.debug("tv_program: ulozeni BASE po fazi A: %s", exc)
+
     items.extend(_fetch_extra_channel_items())
     try:
         from . import tv_program_sk as _sk
@@ -765,12 +883,15 @@ def _build_full_program(base_items: List[Dict[str, Any]],
     try:
         _enrich_with_tmdb_posters(
             items,
-            max_wait_sec=6.0 if bg_mode else None,
+            max_wait_sec=10.0 if bg_mode else None,
             csfd_fallback=True,
             max_items=80 if bg_mode else None,
+            csfd_max_wait_sec=8.0 if bg_mode else None,
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("tv_program TMDB enrich selhal: %s", exc)
+    if bg_mode:
+        _warm_tv_poster_cache(items)
     return items
 
 
@@ -814,10 +935,6 @@ def _background_full_fetch(base_items: Optional[List[Dict[str, Any]]]) -> None:
     global _bg_running
     try:
         from . import shutdown as _shutdown
-        try:
-            from . import lifecycle as _lifecycle
-        except Exception:  # noqa: BLE001
-            _lifecycle = None
         if _shutdown.is_shutting_down():
             return
 
@@ -832,11 +949,17 @@ def _background_full_fetch(base_items: Optional[List[Dict[str, Any]]]) -> None:
                  len(base_items))
         full = _build_full_program(base_items, bg_mode=True)
         if _shutdown.is_shutting_down():
+            # Faze A uz mohla ulozit BASE s plakaty — FULL nechame byt.
             return
-        if _lifecycle and _lifecycle.is_plugin_exiting():
-            return
+        # Vzdy uloz FULL (i kdyz plugin.py uz skoncil) — necekej na lifecycle.
         cache.cache_set(TV_CACHE_KEY, full)
-        cache.cache_set(TV_CACHE_KEY_BASE, base_items)
+        # BASE = non-premium cast s plakaty (ne puvodni neenrichnuty seznam).
+        base_saved = [
+            it for it in full
+            if not it.get("premium")
+        ]
+        if base_saved:
+            cache.cache_set(TV_CACHE_KEY_BASE, base_saved)
         n_prem = sum(1 for it in full if it.get("premium"))
         log.info("tv_program: background fetch hotovo (%d polozek, %d premium)",
                  len(full), n_prem)
@@ -859,38 +982,50 @@ def _background_full_fetch(base_items: Optional[List[Dict[str, Any]]]) -> None:
             _bg_running = False
 
 
-def get_premium_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
+def get_premium_channels(
+    force_refresh: bool = False,
+    items: Optional[List[Dict[str, Any]]] = None,
+) -> List[Tuple[str, str]]:
     """Vrati [(channel_id, channel_name), ...] jen s dnesnim sledovatelnym obsahem.
 
     Sport/zpravy/prazdne kanaly se nezobrazuji. Bez fallbacku na cely
     PREMIUM_CHANNEL_PAGES seznam (drive ukazoval prazdne slozky HBO/Sport).
     """
-    return _channels_with_watchable(force_refresh=force_refresh, premium=True)
+    return _channels_with_watchable(
+        force_refresh=force_refresh, premium=True, items=items)
 
 
-def get_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
+def get_channels(
+    force_refresh: bool = False,
+    items: Optional[List[Dict[str, Any]]] = None,
+) -> List[Tuple[str, str]]:
     """Vrati [(channel_id, channel_name), ...] s dnesnim sledovatelnym obsahem.
 
     Jen filmy/serialy/dokumenty/porady (ne sport/zpravy). Prazdne stanice pryč.
     Jen CZ (iDNES) — SK ma get_sk_channels().
     """
     return _channels_with_watchable(
-        force_refresh=force_refresh, premium=False, country="cz")
+        force_refresh=force_refresh, premium=False, country="cz", items=items)
 
 
-def get_sk_channels(force_refresh: bool = False) -> List[Tuple[str, str]]:
+def get_sk_channels(
+    force_refresh: bool = False,
+    items: Optional[List[Dict[str, Any]]] = None,
+) -> List[Tuple[str, str]]:
     """Slovenske stanice s dnesnim sledovatelnym obsahem."""
     return _channels_with_watchable(
-        force_refresh=force_refresh, premium=False, country="sk")
+        force_refresh=force_refresh, premium=False, country="sk", items=items)
 
 
 def _channels_with_watchable(
     force_refresh: bool = False,
     premium: bool = False,
     country: Optional[str] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Tuple[str, str]]:
     """Kanaly, ktere maji alespon 1 budouci watchable polozku."""
-    items = fetch_today(force_refresh=force_refresh)
+    if items is None:
+        items = fetch_today(force_refresh=force_refresh)
     kinds = set(SCOPE_KINDS["all_watchable"])
     seen: Dict[str, str] = {}
     for it in items:
@@ -951,12 +1086,10 @@ def fetch_today(force_refresh: bool = False,
 
         base = cache.cache_get(TV_CACHE_KEY_BASE, ttl=TV_CACHE_TTL)
         if base is not None:
-            log.info("tv_program: base cache HIT (%d), cekam na pozadi",
+            log.info("tv_program: base cache HIT (%d), enrich na pozadi",
                      len(base))
-            if _tv_items_need_poster_enrich(base):
-                _enrich_with_tmdb_posters(
-                    base, max_wait_sec=5.0, csfd_fallback=True)
-                cache.cache_set(TV_CACHE_KEY_BASE, base)
+            # Bez sync enrich/warm — plakaty/premium/SK dobehnou v BG;
+            # uzivatel listuje hned, po Aktualizovat/znovuotevreni uvidi plne.
             schedule_full_fetch(list(base))
             return _dedupe_tv_items(list(base))
 
@@ -970,7 +1103,7 @@ def fetch_today(force_refresh: bool = False,
         log.info("tv_program: blocking fetch OK, %d polozek", len(items))
         return _dedupe_tv_items(items)
 
-    # Rychly rezim: hlavni stranka sync, TMDB plakaty s limitem, premium na pozadi.
+    # Rychly rezim: hlavni stranka sync (0 enrich), premium/SK/TMDB/CSFD na pozadi.
     base = _fetch_main_page_items()
     if not base:
         return []
@@ -984,11 +1117,9 @@ def fetch_today(force_refresh: bool = False,
     except Exception:  # noqa: BLE001
         pass
 
-    _enrich_with_tmdb_posters(base, max_wait_sec=6.0, csfd_fallback=True)
-    _warm_tv_poster_cache(base)
     cache.cache_set(TV_CACHE_KEY_BASE, base)
     schedule_full_fetch(list(base))
-    log.info("tv_program: rychly fetch OK (%d polozek), premium/SK na pozadi",
+    log.info("tv_program: rychly fetch OK (%d polozek), enrich/premium/SK na pozadi",
              len(base))
     return _dedupe_tv_items(base)
 
@@ -1036,7 +1167,8 @@ def _tv_items_need_poster_enrich(items: List[Dict[str, Any]]) -> bool:
 def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
                               max_wait_sec: Optional[float] = None,
                               csfd_fallback: bool = True,
-                              max_items: Optional[int] = None) -> None:
+                              max_items: Optional[int] = None,
+                              csfd_max_wait_sec: Optional[float] = None) -> None:
     """v0.0.71: doplni TMDB plakaty pro filmy/serialy v TV programu.
 
     Vola TMDB search per polozka (paralel ThreadPoolExecutor, 6 workers).
@@ -1072,10 +1204,12 @@ def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
     enrichable = _tv_enrichable_items(items)
 
     if max_items is not None and len(enrichable) > max_items:
-        # Preferuj polozky bez plakatu + blizsi casy.
+        # Preferuj polozky bez plakatu + blizke aktualnimu casu.
+        now = datetime.now()
+        now_min = now.hour * 60 + now.minute
         enrichable.sort(key=lambda x: (
             1 if (x.get("tmdb_poster") or x.get("csfd_poster")) else 0,
-            x.get("start_min") or 0,
+            abs((x.get("start_min") or 0) - now_min),
         ))
         enrichable = enrichable[:max_items]
 
@@ -1169,10 +1303,13 @@ def _enrich_with_tmdb_posters(items: List[Dict[str, Any]],
              n_with_poster, len(enrichable))
 
     if csfd_fallback:
-        _enrich_with_csfd_fallback(enrichable)
+        _enrich_with_csfd_fallback(enrichable, max_wait_sec=csfd_max_wait_sec)
 
 
-def _enrich_with_csfd_fallback(items: List[Dict[str, Any]]) -> None:
+def _enrich_with_csfd_fallback(
+    items: List[Dict[str, Any]],
+    max_wait_sec: Optional[float] = None,
+) -> None:
     """CSFD doplneni tam, kde TMDB neprineslo plakat nebo hodnoceni."""
     if not items:
         return
@@ -1238,12 +1375,23 @@ def _enrich_with_csfd_fallback(items: List[Dict[str, Any]]) -> None:
             log.debug("tv_program CSFD enrich %r: %s", title, exc)
 
     try:
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, wait
         workers = min(4, max(1, len(need_csfd)))
         pool = ThreadPoolExecutor(max_workers=workers,
                                   thread_name_prefix="tvprog-csfd")
         try:
-            list(pool.map(_one, need_csfd))
+            if max_wait_sec is not None and max_wait_sec > 0:
+                futures = [pool.submit(_one, it) for it in need_csfd]
+                pending = set(futures)
+                budget = float(max_wait_sec)
+                while pending and budget > 0 and not _shutdown.is_shutting_down():
+                    done, pending = wait(pending, timeout=min(0.5, budget))
+                    budget -= 0.5
+                if pending:
+                    log.info("tv_program: CSFD enrich budget - %d/%d nedobehlo",
+                             len(pending), len(futures))
+            else:
+                list(pool.map(_one, need_csfd))
         finally:
             try:
                 pool.shutdown(wait=False, cancel_futures=True)

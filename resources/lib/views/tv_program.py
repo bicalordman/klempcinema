@@ -235,9 +235,9 @@ def view_list_tv_program(handle, base_url, params):
 
     if not tv_program.is_full_cache_ready():
         if tv_program.is_background_fetch_running():
-            bg_label = ("[COLOR FFFFA500][I]HBO, Cinemax, History... "
-                        "se stahuji na pozadi (~1 min). "
-                        "Obnov menu pro plny seznam stanic s obsahem.[/I][/COLOR]")
+            bg_label = ("[COLOR FFFFA500][I]Na pozadi se doplnuje: plakaty, "
+                        "HBO/Cinemax/SK… Muzes listovat hned — "
+                        "Aktualizovat / znovu otevrit = plna cache.[/I][/COLOR]")
         else:
             bg_label = ("[COLOR FFFFA500][I]Placene kanaly jeste nejsou v cache. "
                         "Klikni Aktualizovat — prazdne stanice (sport) se nezobrazi.[/I][/COLOR]")
@@ -278,7 +278,7 @@ def view_list_tv_program(handle, base_url, params):
             url=sec_url, icon=_mi(icon_name), fanart=fanart,
         )
 
-    free_channels = tv_program.get_channels()
+    free_channels = tv_program.get_channels(items=items)
     if free_channels:
         ui.add_dir_item(
             handle=handle,
@@ -294,7 +294,7 @@ def view_list_tv_program(handle, base_url, params):
                 url=folder_url, icon=_channel_icon(cname, cid), fanart=fanart,
             )
 
-    sk_channels = tv_program.get_sk_channels()
+    sk_channels = tv_program.get_sk_channels(items=items)
     if sk_channels:
         ui.add_dir_item(
             handle=handle,
@@ -319,7 +319,7 @@ def view_list_tv_program(handle, base_url, params):
             icon=_mi("tv"), fanart=fanart,
         )
 
-    premium = tv_program.get_premium_channels()
+    premium = tv_program.get_premium_channels(items=items)
     if premium:
         ui.add_dir_item(
             handle=handle,
@@ -348,10 +348,17 @@ def view_list_tv_program(handle, base_url, params):
     ui.end_icon_menu(handle)
 
 
+_SCOPE_PAGE_SIZE = 40
+
+
 def view_tv_program_scope(handle, base_url, params):
     """Seznam polozek jedne TV rubriky (filmy/serialy/porady/dokumenty)."""
     _ensure_login()
     scope = (params.get("scope") or "all_watchable").strip()
+    try:
+        page = max(1, int(params.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
     items = tv_program.fetch_today()
 
     if scope == "prime_films":
@@ -372,7 +379,22 @@ def view_tv_program_scope(handle, base_url, params):
         ui.end_directory(handle, content=content)
         return
 
-    _render_tv_list(handle, base_url, out)
+    start = (page - 1) * _SCOPE_PAGE_SIZE
+    chunk = out[start:start + _SCOPE_PAGE_SIZE]
+    has_more = start + _SCOPE_PAGE_SIZE < len(out)
+    # Sync enrich jen pro viditelnou stranku — BG daemon v Kodi casto nestihne.
+    tv_program.enrich_for_display(chunk)
+    _render_tv_list(handle, base_url, chunk)
+    if has_more:
+        ui.add_next_page_item(
+            handle=handle,
+            base_url=base_url,
+            action="tv_program_scope",
+            sort="",
+            current_page=page,
+            label="[B]Další…[/B]",
+            scope=scope,
+        )
     ui.end_directory(handle, content=content)
 
 
@@ -388,7 +410,8 @@ def view_tv_program_films(handle, base_url, params):
         if not out:
             ui.show_notification("Zadne serialy/dokumenty dnes", time_ms=5000)
         else:
-            _render_tv_list(handle, base_url, out)
+            tv_program.enrich_for_display(out[:_SCOPE_PAGE_SIZE])
+            _render_tv_list(handle, base_url, out[:_SCOPE_PAGE_SIZE])
         ui.end_directory(handle, content="tvshows")
         return
     new_params = dict(params)
@@ -414,5 +437,6 @@ def view_tv_program_channel(handle, base_url, params):
         ui.end_directory(handle, content="videos")
         return
 
+    tv_program.enrich_for_display(items)
     _render_tv_list(handle, base_url, items)
     ui.end_directory(handle, content="videos")

@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.165**
+**Aktuální verze: 0.0.167**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.165.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.167.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -169,16 +169,17 @@ Autor: **Bicalorman**
 
 ## Změny
 
-### Souhrn 0.0.153 → 0.0.165
+### Souhrn 0.0.153 → 0.0.167
 
 | Oblast | Hlavní změny |
 |--------|----------------|
+| TV program | v0.0.167: plakáty při otevření seznamu + dřívější uložení v BG; v0.0.166 rychlé menu |
 | Instalace | v0.0.165: čistý ZIP bez `.venv` (rychlejší repo / start) |
 | Seriály | Hledání v rubrice; lepší kvalita epizod; CZ+EN názvy do sezón; Ordinace „díly“ po 50 |
 | Hledání | Oprava franchise (Hobit…); nahoře jednoduchý název blízky dotazu, ne jen 4K/filmy |
 | Pohádky | Večerníček / TV: doplněna klasika (Broučci, Mach a Šebestová, Pojďte pane…) |
 | Picker kvality | Lepší značení jazyka; u `[?]` zkusí Language ze streamu (MKV) |
-| TV program | CSFD/TMDB plakáty, lepší Webshare match, slovenské stanice (webtv.sk) — od 0.0.153 |
+| TV program (dříve) | CSFD/TMDB plakáty, lepší Webshare match, slovenské stanice (webtv.sk) — od 0.0.153 |
 
 ### Souhrn 0.0.137 → 0.0.152
 
@@ -190,6 +191,17 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.167 — TV program: plakáty se zase doplňují
+
+- Otevření Filmy/Seriály/kanál: sync enrich jen aktuální stránky (Kodi často zabije BG thread)
+- BG nejdřív uloží BASE s plakáty, teprve pak stahuje HBO/SK (a nepřepisuje BASE bez plakátů)
+
+### v0.0.166 — TV program: rychlý first paint
+
+- Cold open: jen iDNES základ (bez sync TMDB/CSFD/warm) → menu listovatelné hned
+- Plakáty, premium a SK doběhnou přes `schedule_full_fetch`; po Aktualizovat / znovuotevření plná cache
+- Jedno `fetch_today` na hlavní menu; scope rubriky stránkované po ~40 (+ Další)
 
 ### v0.0.165 — Čistý ZIP (oprava instalace)
 
