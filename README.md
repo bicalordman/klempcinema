@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.167**
+**Aktuální verze: 0.0.168**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.167.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.168.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -142,13 +142,18 @@ To znamená:
 
 ### Údaje pro ruční platbu
 
+Platba musí jít na **IBAN** (QR kód ho má uvnitř ve formátu SPD). Český zápis účtu je jen pro orientaci.
+
 ```
-IBAN:    CZ95 5500 0000 0010 2685 1852
-Banka:   Raiffeisenbank
-Měna:    CZK
-Zpráva:  Dar KlempCinema    (důležité - nech tam slovo „Dar")
+IBAN:         CZ69 6210 6701 0022 3206 4328
+IBAN (souvisle): CZ6962106701002232064328
+Účet CZ:      670100-2232064328/6210
+Banka:        mBank (kód 6210)
+Měna:         CZK
+Zpráva:       Dar KlempCinema    (důležité — nech tam slovo „Dar“)
 ```
 
+Starý účet Raiffeisenbank (`CZ95 5500…`) už neplatí — nepoužívej ho.
 ### Jak poslat dar přes QR kód
 
 1. V hlavním menu otevři **Poslat autorovi dar (dobrovolné)**
@@ -191,6 +196,10 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.168 — Dar: nový účet mBank
+
+- Nový **IBAN** `CZ69 6210 6701 0022 3206 4328` (účet `670100-2232064328/6210`, mBank) + nový SPD QR
 
 ### v0.0.167 — TV program: plakáty se zase doplňují
 

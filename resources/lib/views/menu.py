@@ -230,7 +230,9 @@ def view_donate(handle: int, base_url: str, params: dict) -> None:
     addon_path = addon.getAddonInfo("path")
     qr_path = os.path.join(addon_path, "resources", "media", "donate_qr.png")
 
-    iban_pretty = "CZ95 5500 0000 0010 2685 1852"
+    iban_pretty = "CZ69 6210 6701 0022 3206 4328"
+    iban_raw = "CZ6962106701002232064328"
+    account_cz = "670100-2232064328/6210"
 
     # v0.0.80: lokalizovany text - drive hardcoded v cestine, ted bere
     # preklady ze strings.po (cz pro CZ Kodi, EN pro anglicky Kodi atd.)
@@ -238,6 +240,9 @@ def view_donate(handle: int, base_url: str, params: dict) -> None:
         _tr_safe(30240, "GIFT FOR THE AUTHOR"),
         "",
         f"{_tr_safe(30241, 'IBAN')}:    {iban_pretty}",
+        f"IBAN:    {iban_raw}",
+        f"Ucet CZ: {account_cz}",
+        "Banka:   mBank (6210)",
         f"{_tr_safe(30242, 'Currency')}:    CZK",
         f"{_tr_safe(30243, 'Message')}:    {_tr_safe(30244, 'Gift KlempCinema')}",
         "",
