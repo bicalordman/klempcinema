@@ -167,6 +167,7 @@ Starý účet Raiffeisenbank (`CZ95 5500…`) už neplatí — nepoužívej ho.
 
 Autor: **Bicalorman**
 
+- **Komunita / novinky (Facebook):** [KlempCinema](https://www.facebook.com/profile.php?id=61593699907959)
 - **Chyby a návrhy:** [GitHub Issues](https://github.com/bicalordman/klempcinema/issues)
 - **Zdrojový kód:** [github.com/bicalordman/klempcinema](https://github.com/bicalordman/klempcinema)
 
