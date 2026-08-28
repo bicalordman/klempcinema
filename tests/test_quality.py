@@ -28,6 +28,25 @@ class TestAudioPicker(unittest.TestCase):
         )
 
 
+class TestPickerLabels(unittest.TestCase):
+    def test_compact_shows_codec_and_atmos(self):
+        label = aws.format_variant_label_compact({
+            "name": "Odhaleni.2024.2160p.UHD.BluRay.x265.TrueHD.Atmos.CZ.dabing.mkv",
+            "size": 4_500_000_000,
+        })
+        self.assertIn("[HEVC]", label)
+        self.assertIn("[Atmos]", label)
+        self.assertIn("[CZ dab]", label)
+
+    def test_compact_shows_hevc_and_dts(self):
+        label = aws.format_variant_label_compact({
+            "name": "Film.2010.1080p.BluRay.x265.DTS.mkv",
+            "size": 2_000_000_000,
+        })
+        self.assertIn("[HEVC]", label)
+        self.assertIn("[DTS]", label)
+
+
 class TestPosterUrl(unittest.TestCase):
     def test_tmdb_is_quality(self):
         url = "https://image.tmdb.org/t/p/w500/abc.jpg"

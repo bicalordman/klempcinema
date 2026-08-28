@@ -2023,6 +2023,47 @@ def enrich_variants_lang_probe(
     return out
 
 
+def _codec_label_for_picker(name: str) -> str:
+    """Video kodek pro picker — HEVC / H264 / AV1."""
+    if not name:
+        return ""
+    for label, pattern in _CODEC_TOKENS:
+        if re.search(pattern, name, re.I):
+            return label
+    return ""
+
+
+def _video_extra_for_picker(name: str) -> str:
+    """REMUX nebo HDR/DV — jeden kratky tag navic ke kodeku."""
+    if not name:
+        return ""
+    for label, pattern in _EXTRA_TOKENS:
+        if label == "REMUX" and re.search(pattern, name, re.I):
+            return "REMUX"
+    for label, pattern in _HDR_TOKENS:
+        if re.search(pattern, name, re.I):
+            return label
+    return ""
+
+
+_PICKER_AUDIO_LABELS = {
+    "ATMOS": "Atmos",
+    "DTS-X": "DTS:X",
+    "TRUEHD": "TrueHD",
+    "DTS-HD MA": "DTS-HD MA",
+    "DTS-HD": "DTS-HD",
+    "DD+": "DD+",
+    "DD 5.1": "DD 5.1",
+}
+
+
+def _picker_audio_label(name: str) -> str:
+    raw = detect_audio_for_picker(name)
+    if not raw:
+        return ""
+    return _PICKER_AUDIO_LABELS.get(raw, raw)
+
+
 def _variant_short_hint(name: str) -> str:
     """Kratky rozlisovac (CAM, HEVC, 10bit) - bez celeho WS nazvu."""
     if not name:
@@ -2047,18 +2088,23 @@ def _variant_short_hint(name: str) -> str:
 
 def format_variant_label_compact(f: Dict[str, Any]) -> str:
     """
-    Kratky popisek pro Kodi Dialog.select - puvodni [zavorky] styl,
-    BEZ celeho WS nazvu (ten rolovat nechceme).
+    Kratky popisek pro Kodi Dialog.select - [zavorky] styl.
 
-    Priklad: '[1080p WEBRip] [5.1] [CZ dab] 4.2 GB'
+    Priklad: '[1080p BluRay] [HEVC] [Atmos] [CZ dab] 4.2 GB'
     """
     name = f.get("name") or ""
     quality = _quality_label(name) or "SD"
-    audio = detect_audio_for_picker(name)
+    codec = _codec_label_for_picker(name)
+    extra = _video_extra_for_picker(name)
+    audio = _picker_audio_label(name)
     size = _format_size(f.get("size"))
     lang = _variant_lang_tag(name, probed_tag=(f.get("lang_tag") or ""))
 
     parts: List[str] = [f"[{quality}]"]
+    if codec:
+        parts.append(f"[{codec}]")
+    if extra and extra != codec:
+        parts.append(f"[{extra}]")
     if audio:
         parts.append(f"[{audio}]")
     parts.append(f"[{lang}]")
@@ -2066,9 +2112,13 @@ def format_variant_label_compact(f: Dict[str, Any]) -> str:
         parts.append(size)
 
     line = "  ".join(parts)
-    if len(line) > 62:
+    if len(line) > 78:
         short_q = (quality.split() or ["SD"])[0]
         parts = [f"[{short_q}]"]
+        if codec:
+            parts.append(f"[{codec}]")
+        if extra and extra != codec:
+            parts.append(f"[{extra}]")
         if audio:
             parts.append(f"[{audio}]")
         parts.append(f"[{lang}]")

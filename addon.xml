@@ -24,7 +24,7 @@
         <source>https://github.com/bicalordman/klempcinema</source>
         <forum>https://github.com/bicalordman/klempcinema/issues</forum>
         <website>https://github.com/bicalordman/klempcinema</website>
-        <news>v0.0.170 Seriály: picker epizod filtruje správný seriál. Picker: [kvalita] [zvuk] [jazyk] GB, nadpis s názvem titulu.</news>
+        <news>v0.0.170 Picker: [kvalita] [HEVC] [Atmos] [CZ dab] GB + filtr epizod podle serialu.</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>
