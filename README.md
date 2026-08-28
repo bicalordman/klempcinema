@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.170**
+**Aktuální verze: 0.0.171**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.170.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.171.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -198,7 +198,12 @@ Autor: **Bicalorman**
 
 ---
 
-### v0.0.170 — Picker kvality: sjednocený vzhled
+### v0.0.171 — Picker kvality: kodek + zvuk
+
+- Popisky `[1080p BluRay] [HEVC] [Atmos] [CZ dab] 4,2 GB` — kodek/zvuk z názvu i ze streamu
+- Nutná nová verze (Kodi neaktualizuje soubory při stejném čísle 0.0.170)
+
+### v0.0.170 — Seriály: filtr epizod + picker
 
 - Filmy i epizody: nadpis `Název — Vyber kvalitu` + druhý řádek s názvem titulu v seznamu variant
 

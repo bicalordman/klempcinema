@@ -32,19 +32,33 @@ class TestPickerLabels(unittest.TestCase):
     def test_compact_shows_codec_and_atmos(self):
         label = aws.format_variant_label_compact({
             "name": "Odhaleni.2024.2160p.UHD.BluRay.x265.TrueHD.Atmos.CZ.dabing.mkv",
-            "size": 4_500_000_000,
+            "size": 12_665_864_192,
         })
+        self.assertIn("[4K UHD]", label)
         self.assertIn("[HEVC]", label)
         self.assertIn("[Atmos]", label)
         self.assertIn("[CZ dab]", label)
+        self.assertIn("11,8 GB", label)
 
     def test_compact_shows_hevc_and_dts(self):
         label = aws.format_variant_label_compact({
             "name": "Film.2010.1080p.BluRay.x265.DTS.mkv",
             "size": 2_000_000_000,
         })
+        self.assertIn("[1080p BluRay]", label)
         self.assertIn("[HEVC]", label)
         self.assertIn("[DTS]", label)
+
+    def test_compact_webrip_dd_plus(self):
+        label = aws.format_variant_label_compact({
+            "name": "Film.2020.720p.WEBRip.x264.DDP.5.1.EN.mkv",
+            "size": 1_400_000_000,
+        })
+        self.assertIn("[720p WEBRip]", label)
+        self.assertIn("[H264]", label)
+        self.assertIn("[DD+ 5.1]", label)
+        self.assertIn("[EN]", label)
+        self.assertIn("1,3 GB", label)
 
 
 class TestPosterUrl(unittest.TestCase):

@@ -1339,18 +1339,30 @@ def _is_czech_content(name: str) -> bool:
 
 
 def _quality_label(name: str) -> str:
-    """Lidsky čitelný štítek kvality (např. '1080p BluRay'). 'SD' pokud nic."""
+    """Lidsky čitelný štítek kvality (např. '1080p BluRay', '4K UHD'). 'SD' pokud nic."""
     if not name:
         return ""
     parts: List[str] = []
-    for token in ("2160p", "4K", "UHD", "1080p", "720p", "480p"):
-        if re.search(rf"\b{re.escape(token)}\b", name, re.I):
-            parts.append(token)
-            break
-    for token in ("BluRay", "WEB-DL", "WEBRip", "HDRip", "DVDRip", "HDTV"):
-        if re.search(rf"\b{re.escape(token)}\b", name, re.I):
-            parts.append(token)
-            break
+    if re.search(r"\b(?:2160p|4k|uhd)\b", name, re.I):
+        parts.append("4K UHD")
+    else:
+        for token in ("1080p", "720p", "480p"):
+            if re.search(rf"\b{re.escape(token)}\b", name, re.I):
+                parts.append(token)
+                break
+        for token in ("BluRay", "WEB-DL", "WEBRip", "HDRip", "DVDRip", "HDTV"):
+            if re.search(rf"\b{re.escape(token)}\b", name, re.I):
+                parts.append(token)
+                break
+        if len(parts) < 2:
+            if re.search(r"web[-_.]?dl|webdl", name, re.I):
+                parts.append("WEB-DL")
+            elif re.search(r"web[-_.]?rip|webrip", name, re.I):
+                parts.append("WEBRip")
+            elif re.search(r"brrip|bdrip|bluray|blu[-_.]?ray", name, re.I):
+                parts.append("BluRay")
+            elif re.search(r"\bhdtv\b", name, re.I):
+                parts.append("HDTV")
     return " ".join(parts) if parts else "SD"
 
 
@@ -1438,6 +1450,8 @@ def detect_audio_for_picker(name: str) -> str:
     Audio pro quality picker - sirsi nez detect_audio (6CH, CZ.5.1, stereo).
     """
     audio = detect_audio(name)
+    if audio == "DD+" and re.search(r"\b5\.1\b|\b5ch\b", name, re.I):
+        return "DD+ 5.1"
     if audio:
         return audio
     if not name:
@@ -1465,6 +1479,8 @@ def detect_audio_for_picker(name: str) -> str:
     if re.search(r"[\W_.-]ac3(?:[\W_.-]|$)", name, re.I):
         return "DD 5.1"
     if re.search(r"[\W_.-]ddp(?:[\W_.-]|$)", name, re.I):
+        if re.search(r"\b5\.1\b|\b5ch\b", name, re.I):
+            return "DD+ 5.1"
         return "DD+"
     return ""
 
@@ -1542,7 +1558,7 @@ def detect_badges(name: str) -> List[str]:
 
 
 def _format_size(size_bytes: Any) -> str:
-    """Lidsky čitelná velikost: '1.42 GB', '350 MB' apod."""
+    """Lidsky čitelná velikost: '4,2 GB', '350 MB' apod."""
     try:
         b = int(size_bytes)
     except (TypeError, ValueError):
@@ -1553,7 +1569,7 @@ def _format_size(size_bytes: Any) -> str:
         return f"{b/1024:.0f} KB"
     if b < 1024 ** 3:
         return f"{b/1024**2:.0f} MB"
-    return f"{b/1024**3:.2f} GB"
+    return f"{b/1024**3:.1f} GB".replace(".", ",")
 
 
 def _norm_compare(s: str) -> str:
@@ -1838,6 +1854,10 @@ def _variant_lang_tag(name: str, probed_tag: str = "") -> str:
     kdyz nazev jazyk neuvadi — stejne info, ktere Kodi ukaze ve stopach.
     """
     if probed_tag:
+        if probed_tag == "CZ":
+            return "CZ dab"
+        if probed_tag == "SK":
+            return "SK dab"
         return probed_tag
     if _detect_dubbed(name):
         if re.search(r"\bSK\b|slovensk\w*|\bdab\s+SK\b", name, re.IGNORECASE):
@@ -1888,6 +1908,40 @@ def _langs_from_container_head(data: bytes) -> set:
     return found
 
 
+def _tech_from_container_head(data: bytes) -> Dict[str, str]:
+    """
+    Video/audio technika z hlavicky MKV/MP4 (kdyz chybi v nazvu souboru).
+    """
+    out: Dict[str, str] = {}
+    if not data or len(data) < 16:
+        return out
+    u = data.upper()
+    if b"V_MPEGH/ISO/HEVC" in data or b"HEVC" in u or b"X265" in u:
+        out["codec_tag"] = "HEVC"
+    elif b"V_MPEG4/ISO/AVC" in data or b"AVC1" in u or b"X264" in u or b"H264" in u:
+        out["codec_tag"] = "H264"
+    elif b"AV01" in u or re.search(rb"\bAV1\b", data):
+        out["codec_tag"] = "AV1"
+    # Audio — Matroska CodecID + bezne retezce v hlavicce
+    if b"ATMOS" in u or b"DOLBY ATMOS" in u:
+        out["audio_tag"] = "Atmos"
+    elif b"A_TRUEHD" in data or b"TRUEHD" in u:
+        out["audio_tag"] = "TrueHD"
+    elif b"DTSX" in u or b"DTS-X" in u or b"DTS:X" in u:
+        out["audio_tag"] = "DTS:X"
+    elif b"DTS-HD MA" in u or b"A_DTS/EXPRESS" in data or b"DTS-HD" in u:
+        out["audio_tag"] = "DTS-HD"
+    elif b"A_DTS" in data:
+        out["audio_tag"] = "DTS"
+    elif b"A_EAC3" in data or b"EAC3" in u or b"E-AC-3" in u or b"DDP" in u:
+        out["audio_tag"] = "DD+"
+    elif b"A_AC3" in data or b"AC3" in u or b"AC-3" in u:
+        out["audio_tag"] = "DD 5.1"
+    elif b"A_AAC" in data or b"AAC" in u:
+        out["audio_tag"] = "AAC"
+    return out
+
+
 def _tag_from_probed_langs(langs: set) -> str:
     """Mapovani nactenych kodu -> tag pickeru."""
     if not langs:
@@ -1924,6 +1978,44 @@ def _http_get_bytes(url: str, max_bytes: int = 786432,
         return b""
 
 
+def probe_stream_picker_meta(token: Optional[str], ident: str,
+                             item_type: str = "movie") -> Dict[str, str]:
+    """
+    Jazyk + kodek + zvuk ze zacatku streamu (Range ~768 KB).
+
+    Cache 7 dni per ident. Vraci dict: lang_tag, codec_tag, audio_tag.
+    """
+    ident = (ident or "").strip()
+    empty = {"lang_tag": "", "codec_tag": "", "audio_tag": ""}
+    if not ident:
+        return empty
+    cache_key = f"pickerprobe:v2:{ident}"
+    try:
+        cached = cache.cache_get(cache_key, ttl=7 * 86400)
+        if isinstance(cached, dict):
+            return cached
+    except Exception:  # noqa: BLE001
+        pass
+
+    result = dict(empty)
+    try:
+        url = get_stream_url(token, ident, item_type)
+        if url:
+            head = _http_get_bytes(url, max_bytes=786432, timeout=2.2)
+            result["lang_tag"] = _tag_from_probed_langs(
+                _langs_from_container_head(head),
+            )
+            result.update(_tech_from_container_head(head))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("probe_stream_picker_meta(%s): %s", ident, exc)
+
+    try:
+        cache.cache_set(cache_key, result)
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
 def probe_stream_lang_tag(token: Optional[str], ident: str,
                           item_type: str = "movie") -> str:
     """
@@ -1931,31 +2023,7 @@ def probe_stream_lang_tag(token: Optional[str], ident: str,
 
     Cache 7 dni per ident. Pri chybe/timeoutu vraci ''.
     """
-    ident = (ident or "").strip()
-    if not ident:
-        return ""
-    cache_key = f"langprobe:v1:{ident}"
-    try:
-        cached = cache.cache_get(cache_key, ttl=7 * 86400)
-        if cached is not None:
-            return str(cached or "")
-    except Exception:  # noqa: BLE001
-        pass
-
-    tag = ""
-    try:
-        url = get_stream_url(token, ident, item_type)
-        if url:
-            head = _http_get_bytes(url, max_bytes=786432, timeout=2.2)
-            tag = _tag_from_probed_langs(_langs_from_container_head(head))
-    except Exception as exc:  # noqa: BLE001
-        log.debug("probe_stream_lang_tag(%s): %s", ident, exc)
-
-    try:
-        cache.cache_set(cache_key, tag)
-    except Exception:  # noqa: BLE001
-        pass
-    return tag
+    return probe_stream_picker_meta(token, ident, item_type).get("lang_tag") or ""
 
 
 def enrich_variants_lang_probe(
@@ -1963,10 +2031,10 @@ def enrich_variants_lang_probe(
     token: Optional[str] = None,
     *,
     max_probe: int = 8,
-    wall_sec: float = 3.5,
+    wall_sec: float = 4.5,
 ) -> List[Dict[str, Any]]:
     """
-    Doplni lang_tag ze streamu u variant, kde nazev jazyk neuvadi ([?]).
+    Doplni lang/codec/audio ze streamu u variant, kde nazev chybi.
 
     Volat pred quality pickerem — listing nerusi (jen play_pick).
     """
@@ -1975,21 +2043,23 @@ def enrich_variants_lang_probe(
     need: List[Tuple[int, Dict[str, Any]]] = []
     for i, v in enumerate(variants):
         name = v.get("name") or ""
-        if _variant_lang_tag(name) != "?":
-            continue
+        lang = _variant_lang_tag(name)
+        codec = _codec_label_for_picker(name)
+        audio = _picker_audio_label(name)
         if not (v.get("ident") or v.get("id")):
             continue
-        need.append((i, v))
+        if lang == "?" or not codec or not audio:
+            need.append((i, v))
         if len(need) >= max_probe:
             break
     if not need:
         return variants
 
-    def _one(item: Dict[str, Any]) -> str:
+    def _one(item: Dict[str, Any]) -> Dict[str, str]:
         ident = item.get("ident") or item.get("id") or ""
-        return probe_stream_lang_tag(token, ident, "movie")
+        return probe_stream_picker_meta(token, ident, "movie")
 
-    results: Dict[int, str] = {}
+    results: Dict[int, Dict[str, str]] = {}
     pool = None
     try:
         pool = ThreadPoolExecutor(max_workers=min(4, len(need)))
@@ -1998,9 +2068,9 @@ def enrich_variants_lang_probe(
         for fut in done:
             idx = futs[fut]
             try:
-                tag = fut.result()
-                if tag:
-                    results[idx] = tag
+                meta = fut.result()
+                if meta:
+                    results[idx] = meta
             except Exception:  # noqa: BLE001
                 pass
         for fut in pending:
@@ -2014,12 +2084,19 @@ def enrich_variants_lang_probe(
     if not results:
         return variants
     out = [dict(v) for v in variants]
-    for idx, tag in results.items():
-        out[idx]["lang_tag"] = tag
-        # Aby UI badges / cz_only videly CZ ze streamu
-        if tag in ("CZ", "CZ+SK", "Dual"):
+    for idx, meta in results.items():
+        if meta.get("lang_tag"):
+            out[idx]["lang_tag"] = meta["lang_tag"]
+        if meta.get("codec_tag"):
+            out[idx]["codec_tag"] = meta["codec_tag"]
+        if meta.get("audio_tag"):
+            out[idx]["audio_tag"] = meta["audio_tag"]
+        if meta.get("lang_tag") in ("CZ", "CZ+SK", "Dual"):
             out[idx]["dubbed"] = True
-    log.info("lang_probe: doplneno %d/%d variant", len(results), len(need))
+    log.info(
+        "picker_probe: doplneno %d/%d variant (lang/codec/audio)",
+        len(results), len(need),
+    )
     return out
 
 
@@ -2052,13 +2129,16 @@ _PICKER_AUDIO_LABELS = {
     "TRUEHD": "TrueHD",
     "DTS-HD MA": "DTS-HD MA",
     "DTS-HD": "DTS-HD",
+    "DD+ 5.1": "DD+ 5.1",
     "DD+": "DD+",
     "DD 5.1": "DD 5.1",
 }
 
 
-def _picker_audio_label(name: str) -> str:
+def _picker_audio_label(name: str, probed: str = "") -> str:
     raw = detect_audio_for_picker(name)
+    if not raw:
+        raw = (probed or "").strip()
     if not raw:
         return ""
     return _PICKER_AUDIO_LABELS.get(raw, raw)
@@ -2090,13 +2170,13 @@ def format_variant_label_compact(f: Dict[str, Any]) -> str:
     """
     Kratky popisek pro Kodi Dialog.select - [zavorky] styl.
 
-    Priklad: '[1080p BluRay] [HEVC] [Atmos] [CZ dab] 4.2 GB'
+    Priklad: '[1080p BluRay] [HEVC] [Atmos] [CZ dab] 4,2 GB'
     """
     name = f.get("name") or ""
     quality = _quality_label(name) or "SD"
-    codec = _codec_label_for_picker(name)
+    codec = _codec_label_for_picker(name) or (f.get("codec_tag") or "")
     extra = _video_extra_for_picker(name)
-    audio = _picker_audio_label(name)
+    audio = _picker_audio_label(name, probed=(f.get("audio_tag") or ""))
     size = _format_size(f.get("size"))
     lang = _variant_lang_tag(name, probed_tag=(f.get("lang_tag") or ""))
 
@@ -2111,7 +2191,7 @@ def format_variant_label_compact(f: Dict[str, Any]) -> str:
     if size:
         parts.append(size)
 
-    line = "  ".join(parts)
+    line = " ".join(parts)
     if len(line) > 78:
         short_q = (quality.split() or ["SD"])[0]
         parts = [f"[{short_q}]"]
@@ -2124,7 +2204,7 @@ def format_variant_label_compact(f: Dict[str, Any]) -> str:
         parts.append(f"[{lang}]")
         if size:
             parts.append(size)
-        line = "  ".join(parts)
+        line = " ".join(parts)
     return line
 
 

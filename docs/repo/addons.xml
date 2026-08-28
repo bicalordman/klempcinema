@@ -2,7 +2,7 @@
 <addons>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.170"
+       version="0.0.171"
        provider-name="Bicalorman">
 
     <requires>
@@ -25,7 +25,7 @@
         <source>https://github.com/bicalordman/klempcinema</source>
         <forum>https://github.com/bicalordman/klempcinema/issues</forum>
         <website>https://github.com/bicalordman/klempcinema</website>
-        <news>v0.0.170 Picker: [kvalita] [HEVC] [Atmos] [CZ dab] GB + filtr epizod podle serialu.</news>
+        <news>v0.0.171 Picker: [1080p BluRay] [HEVC] [Atmos] [CZ dab] GB — kodek/zvuk i ze streamu kdyz chybi v nazvu.</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>
