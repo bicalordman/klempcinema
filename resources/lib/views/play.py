@@ -337,11 +337,7 @@ def view_play_pick(handle, params):
             )
         except Exception as exc:  # noqa: BLE001
             log.debug("lang_probe pred pickerem: %s", exc)
-        labels = api_webshare.build_variant_picker_labels(
-            variants,
-            show_source_name=(mode == "episode"),
-            context_line=base,
-        )
+        labels = api_webshare.build_variant_picker_labels(variants)
         heading = f"{base} — {_tr(30030)}"
         idx = xbmcgui.Dialog().select(heading, labels)
         if idx < 0:

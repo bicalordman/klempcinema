@@ -2072,43 +2072,30 @@ def format_variant_label_compact(f: Dict[str, Any]) -> str:
         if audio:
             parts.append(f"[{audio}]")
         parts.append(f"[{lang}]")
+        if size:
+            parts.append(size)
         line = "  ".join(parts)
     return line
 
 
 def build_variant_picker_labels(
     variants: List[Dict[str, Any]],
-    *,
-    show_source_name: bool = False,
-    context_line: str = "",
 ) -> List[str]:
     """
-    Popisky pro quality picker - citelne zavorky, kratke, bez rolovani.
+    Popisky pro quality picker — jeden radek, [kvalita] [zvuk] [jazyk] velikost.
 
-    show_source_name=True (epizody): kratky nazev WS souboru pro rozliseni
-    variant stejne kvality z ruznych serialu / releasu.
-
-    context_line: druhy radek (\\n) — sjednocene jmeno titulu (film / SxxEyy).
+    Pri duplicitach stejneho radku doplni kratky hint (HEVC, CAM, #2).
     """
     labels: List[str] = []
     seen: Dict[str, int] = {}
-    ctx = (context_line or "").strip()
     for v in variants:
         core = format_variant_label_compact(v)
         name = v.get("name") or ""
-        if show_source_name:
-            raw = _strip_extension(name)
-            if len(raw) > 52:
-                raw = raw[:49] + "..."
-            if raw:
-                core = f"{core}  · {raw}"
         count = seen.get(core, 0)
         seen[core] = count + 1
         if count:
             hint = _variant_short_hint(name)
             core = f"{core}  [{hint or f'#{count + 1}'}]"
-        if ctx:
-            core = f"{core}\n{ctx}"
         labels.append(core)
     return labels
 
