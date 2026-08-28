@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.168"
+       version="0.0.170"
        provider-name="Bicalorman">
 
     <requires>
@@ -24,7 +24,7 @@
         <source>https://github.com/bicalordman/klempcinema</source>
         <forum>https://github.com/bicalordman/klempcinema/issues</forum>
         <website>https://github.com/bicalordman/klempcinema</website>
-        <news>v0.0.168 Dar: novy ucet mBank 670100-2232064328/6210 + novy SPD QR.</news>
+        <news>v0.0.170 Picker kvality: sjednoceny nadpis + druhy radek s nazvem titulu (filmy i epizody).</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

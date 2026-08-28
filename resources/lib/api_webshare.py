@@ -1767,6 +1767,68 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
     return False
 
 
+def _parse_episode_base(
+    base_title: str,
+) -> Tuple[str, Optional[Tuple[int, int]]]:
+    """Z base_title epizody (napr. 'Ordinace S01E05') vrati seriál + (S, E)."""
+    m = re.search(r"(.+?)\s+S(\d{1,2})\s*[EX]\s*(\d{1,4})", base_title, re.I)
+    if not m:
+        return (_series_name(base_title) or base_title or "").strip(), None
+    return m.group(1).strip(), (int(m.group(2)), int(m.group(3)))
+
+
+def _detect_series_from_episode_filename(filename: str) -> str:
+    """Seriál z WS názvu epizody — stejná logika jako _collect_episodes_files."""
+    if _parse_se(filename)[0] is not None:
+        return _series_name(filename)
+    return _ct.clean_title(
+        re.split(
+            r"epizod[a]?|d[ií]l|diel|č[aá]st|cast",
+            filename,
+            maxsplit=1,
+            flags=re.I,
+        )[0],
+    ) or _series_name(filename)
+
+
+def _episode_file_matches_series(
+    filename: str,
+    series_name: str,
+    season: int,
+    episode: int,
+) -> bool:
+    """SxxEyy + shoda názvu seriálu (ne cizí serial se stejným číslem dílu)."""
+    s, e = _parse_episode(filename, series_name)
+    if s is None or e is None:
+        return False
+    if (int(s), int(e)) != (int(season), int(episode)):
+        return False
+    detected = _detect_series_from_episode_filename(filename)
+    return _series_title_match_for_episodes(series_name, detected)
+
+
+def _filter_episode_variants(
+    variants: List[Dict[str, Any]],
+    base_title: str,
+) -> List[Dict[str, Any]]:
+    series, episode_se = _parse_episode_base(base_title)
+    if not series or not episode_se:
+        return variants
+    s_num, e_num = episode_se
+    out = [
+        v for v in variants
+        if _episode_file_matches_series(
+            v.get("name") or "", series, s_num, e_num,
+        )
+    ]
+    if len(out) < len(variants):
+        log.info(
+            "_filter_episode_variants(%r): %d -> %d (odstraneny cizi serialy)",
+            base_title, len(variants), len(out),
+        )
+    return out
+
+
 def _variant_lang_tag(name: str, probed_tag: str = "") -> str:
     """
     Jazykovy tag pro picker.
@@ -2014,20 +2076,39 @@ def format_variant_label_compact(f: Dict[str, Any]) -> str:
     return line
 
 
-def build_variant_picker_labels(variants: List[Dict[str, Any]]) -> List[str]:
+def build_variant_picker_labels(
+    variants: List[Dict[str, Any]],
+    *,
+    show_source_name: bool = False,
+    context_line: str = "",
+) -> List[str]:
     """
     Popisky pro quality picker - citelne zavorky, kratke, bez rolovani.
+
+    show_source_name=True (epizody): kratky nazev WS souboru pro rozliseni
+    variant stejne kvality z ruznych serialu / releasu.
+
+    context_line: druhy radek (\\n) — sjednocene jmeno titulu (film / SxxEyy).
     """
     labels: List[str] = []
     seen: Dict[str, int] = {}
+    ctx = (context_line or "").strip()
     for v in variants:
         core = format_variant_label_compact(v)
+        name = v.get("name") or ""
+        if show_source_name:
+            raw = _strip_extension(name)
+            if len(raw) > 52:
+                raw = raw[:49] + "..."
+            if raw:
+                core = f"{core}  · {raw}"
         count = seen.get(core, 0)
         seen[core] = count + 1
         if count:
-            name = v.get("name") or ""
             hint = _variant_short_hint(name)
             core = f"{core}  [{hint or f'#{count + 1}'}]"
+        if ctx:
+            core = f"{core}\n{ctx}"
         labels.append(core)
     return labels
 
@@ -5911,6 +5992,8 @@ def get_quality_variants(
     """
     def _finalize(variants: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out = variants
+        if mode == "episode" and out:
+            out = _filter_episode_variants(out, base_title)
         if year and out:
             out = filter_variants_by_year(out, year)
             log.info("get_quality_variants(base=%r): year=%s -> %d variant",
@@ -5950,14 +6033,12 @@ def get_quality_variants(
     episode_se: Optional[Tuple[int, int]] = None
 
     if mode == "episode":
-        m = re.search(r"(.+?)\s+S(\d{1,2})\s*[EX]\s*(\d{1,4})", base_title, re.I)
-        if m:
-            episode_series = m.group(1).strip()
-            episode_se = (int(m.group(2)), int(m.group(3)))
+        episode_series, episode_se = _parse_episode_base(base_title)
+        if episode_se:
+            s_num, e_num = episode_se
             log.info("get_quality_variants(episode): query='%s' (z base=%r)",
                      episode_series, base_title)
             # v0.0.164: multi-query jako u filmů (ne jen 1 WS page)
-            s_num, e_num = episode_se
             ep_queries = [
                 episode_series,
                 f"{episode_series} S{s_num:02d}E{e_num:02d}",
@@ -6007,11 +6088,19 @@ def get_quality_variants(
         if mode == "episode":
             if not episode_series:
                 episode_series = _series_name(base_title) or base_title
-            s, e = _parse_episode(name, episode_series)
-            if s is None or e is None:
-                continue
-            if episode_se is not None and (s, e) != episode_se:
-                continue
+            if episode_se is not None:
+                if not _episode_file_matches_series(
+                    name, episode_series, episode_se[0], episode_se[1],
+                ):
+                    continue
+            else:
+                s, e = _parse_episode(name, episode_series)
+                if s is None or e is None:
+                    continue
+                if not _episode_file_matches_series(
+                    name, episode_series, int(s), int(e),
+                ):
+                    continue
             matching.append(f)
         else:
             if mode == "series":
