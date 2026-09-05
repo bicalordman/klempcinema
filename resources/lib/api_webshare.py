@@ -1846,6 +1846,20 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
                 and dt.issubset(set(req_sig))
             ):
                 return True
+            # Opačně: requested 'Reacher', detected 'Jack Reacher'
+            det_sig = [
+                t for t in _title_meaningful_token_list(
+                    _ct.ascii_fold(detected) or detected
+                )
+                if t not in _FRANCHISE_NOISE_TOKENS
+            ]
+            if (
+                len(req_sig) == 1
+                and len(req_sig[0]) >= 5
+                and len(det_sig) >= 2
+                and det_sig[-1] == req_sig[0]
+            ):
+                return True
     # Spin-off / podtitul: "The Walking Dead: Dead City" ↔ WS "Dead City"
     # Celý podtitul (min. 2 tokeny) — samotné "city" nesmí chytit Big City Greens.
     sub = _series_subtitle(requested)
@@ -5256,7 +5270,7 @@ def _collect_episodes_files(series_name: str,
         sorted({_norm_compare(a) for a in (alt_names or []) if (a or "").strip()})
     )
     cache_key = (
-        f"episodes_files:v13:{_norm_compare(series_name)}"
+        f"episodes_files:v14:{_norm_compare(series_name)}"
         f":{'s' if strict else 'n'}:{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5685,7 +5699,7 @@ def _fill_missing_episodes(
             got += 1
         return got
 
-    # 1) Hromadně po neúplných sezónách: 'Reacher S01' najde víc než S01E02
+    # 1) Hromadně po neúplných sezónách: 'Reacher S01' / 'Reacher.S01'
     incomplete_seasons = sorted({s for s, _e in targets})
     for s_num in incomplete_seasons:
         if _shutdown.is_shutting_down():
@@ -5693,9 +5707,15 @@ def _fill_missing_episodes(
         for mn in match_names:
             if _shutdown.is_shutting_down():
                 break
-            for q in (f"{mn} S{s_num:02d}", f"{mn} S{s_num}"):
-                for sort_mode in ("rating", "recent"):
-                    for page in (1, 2):
+            season_queries = (
+                f"{mn} S{s_num:02d}",
+                f"{mn} S{s_num}",
+                f"{mn}.S{s_num:02d}",
+                f"{mn} season {s_num}",
+            )
+            for q in season_queries:
+                for sort_mode in ("recent", "rating"):
+                    for page in (1, 2, 3):
                         if _shutdown.is_shutting_down():
                             break
                         batch = search_videos(
@@ -5704,6 +5724,21 @@ def _fill_missing_episodes(
                         if not batch:
                             break
                         _ingest(batch, want_s=s_num)
+
+    # 1b) Široký sweep krátkého aliasu (Reacher) — chybějící díly často
+    # nejsou pod 'Reacher S01', ale v obecném listingu.
+    short_names = [n for n in match_names if len(n.split()) == 1 and len(n) >= 5]
+    for mn in short_names[:2]:
+        if _shutdown.is_shutting_down():
+            break
+        for sort_mode in ("recent", "rating"):
+            for page in range(1, 6):
+                if _shutdown.is_shutting_down():
+                    break
+                batch = search_videos(query=mn, sort=sort_mode, page=page) or []
+                if not batch:
+                    break
+                _ingest(batch)
 
     # Přepočítej zbývající díry po sezónním sweepu
     still_missing: List[Tuple[int, int]] = []
@@ -5719,6 +5754,7 @@ def _fill_missing_episodes(
         queries = []
         for mn in match_names:
             queries.append(f"{mn} {se}")
+            queries.append(f"{mn}.{se}")
             queries.append(f"{mn} S{s_num}E{e_num}")
             queries.append(f"{mn} {s_num}x{e_num:02d}")
         hit = False
@@ -5951,7 +5987,7 @@ def get_series_seasons(series_name: str,
     ]
     alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v5:{_norm_compare(series_name)}"
+        f"series_seasons:v6:{_norm_compare(series_name)}"
         f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5966,6 +6002,8 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v3:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v14:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
                 f"episodes_files:v13:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -6086,7 +6124,7 @@ def get_series_seasons(series_name: str,
                 if len(files) > before:
                     try:
                         ep_cache = (
-                            f"episodes_files:v13:{_norm_compare(series_name)}"
+                            f"episodes_files:v14:{_norm_compare(series_name)}"
                             f":{'s' if (fairy and fairy.get('strict')) else 'n'}"
                             f":{classic_year or 0}:{alt_key}"
                         )

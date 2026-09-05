@@ -112,6 +112,8 @@ class TestEpisodeAltParse(unittest.TestCase):
     def test_jack_reacher_short_ws_name(self):
         self.assertTrue(aws._series_title_match_for_episodes(
             "Jack Reacher", "Reacher"))
+        self.assertTrue(aws._series_title_match_for_episodes(
+            "Reacher", "Jack Reacher"))
         self.assertTrue(aws._episode_file_matches_series(
             "Reacher.S01E03.1080p.WEB.mkv", "Jack Reacher", 1, 3))
         self.assertIn("Reacher", aws._series_short_aliases("Jack Reacher"))
