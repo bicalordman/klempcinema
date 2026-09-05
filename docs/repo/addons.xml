@@ -2,7 +2,7 @@
 <addons>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.179"
+       version="0.0.180"
        provider-name="Bicalorman">
 
     <requires>
@@ -25,7 +25,7 @@
         <source>https://github.com/bicalordman/klempcinema</source>
         <forum>https://github.com/bicalordman/klempcinema/issues</forum>
         <website>https://github.com/bicalordman/klempcinema</website>
-        <news>v0.0.179 Season COMPLETE packy (Reacher.S03.COMPLETE) se zapocitaji.</news>
+        <news>v0.0.180 Rychlejsi Aktualizovat (mene WS dotazu, bez timeoutu 0/8).</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

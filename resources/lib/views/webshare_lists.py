@@ -413,8 +413,8 @@ def view_list_series_seasons(handle, base_url, params):
     force_refresh = (params.get("refresh") or "") == "1"
     if force_refresh:
         ui.show_notification(
-            f"Aktualizuji '{name[:40]}' - hledam nove dily na Webshare...",
-            time_ms=4000,
+            f"Aktualizuji '{name[:40]}' (rychlejsi hledani)...",
+            time_ms=3500,
         )
 
     log.info("view_list_series_seasons: name=%r original=%r refresh=%s",
