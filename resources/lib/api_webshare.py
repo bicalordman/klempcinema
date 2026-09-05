@@ -1750,6 +1750,34 @@ def _franchise_meaningful_tokens(s: str) -> set:
     }
 
 
+def _series_short_aliases(series_name: str) -> List[str]:
+    """
+    Krátké WS aliasy: 'Jack Reacher' → 'Reacher', 'Dead City' z podtitulu.
+    Webshare často pojmenuje soubory jen příjmením / krátkým názvem.
+    """
+    out: List[str] = []
+    sub = _series_subtitle(series_name)
+    if sub:
+        out.append(sub)
+    words = [
+        t for t in _title_meaningful_token_list(
+            _ct.ascii_fold(series_name) or series_name
+        )
+        if t not in _FRANCHISE_NOISE_TOKENS
+    ]
+    if len(words) >= 2 and len(words[-1]) >= 5:
+        alias = words[-1].capitalize() if words[-1].islower() else words[-1]
+        # Preferuj tvar z původního názvu (Reacher z Jack Reacher)
+        raw_words = re.findall(r"\w+", series_name or "")
+        for w in reversed(raw_words):
+            if w.lower() == words[-1]:
+                alias = w
+                break
+        if alias not in out and _norm_compare(alias) != _norm_compare(series_name):
+            out.append(alias)
+    return out
+
+
 def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
     """Shoda pro epizody — Survivor SK tagy, ale ne spin-off (Bachelor in Paradise)."""
     if not requested or not detected:
@@ -1801,6 +1829,21 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
                 and first in dt
                 and max(len(t) for t in dt) >= 5
                 and (extras & _CZ_TITLE_FILLER)
+            ):
+                return True
+            # 'Jack Reacher' → WS 'Reacher' (poslední slovo, min. 5 znaků)
+            req_sig = [
+                t for t in _title_meaningful_token_list(
+                    _ct.ascii_fold(requested) or requested
+                )
+                if t not in _FRANCHISE_NOISE_TOKENS
+            ]
+            if (
+                len(req_sig) >= 2
+                and len(dt) <= 2
+                and req_sig[-1] in dt
+                and len(req_sig[-1]) >= 5
+                and dt.issubset(set(req_sig))
             ):
                 return True
     # Spin-off / podtitul: "The Walking Dead: Dead City" ↔ WS "Dead City"
@@ -5213,7 +5256,7 @@ def _collect_episodes_files(series_name: str,
         sorted({_norm_compare(a) for a in (alt_names or []) if (a or "").strip()})
     )
     cache_key = (
-        f"episodes_files:v11:{_norm_compare(series_name)}"
+        f"episodes_files:v13:{_norm_compare(series_name)}"
         f":{'s' if strict else 'n'}:{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5319,6 +5362,11 @@ def _collect_episodes_files(series_name: str,
         a = (a or "").strip()
         if a and a not in match_names:
             match_names.append(a)
+    for alias in _series_short_aliases(series_name):
+        if alias not in match_names:
+            match_names.append(alias)
+        if alias not in queries:
+            queries.append(alias)
 
     def _parse_ep_any(fname: str) -> Tuple[Optional[int], Optional[int]]:
         for mn in match_names:
@@ -5528,7 +5576,7 @@ def _fill_missing_episodes(
     tmdb_seasons: List[Dict[str, Any]],
     alt_names: Optional[List[str]] = None,
     *,
-    max_targets: int = 24,
+    max_targets: int = 36,
 ) -> List[Dict[str, Any]]:
     """
     Doplní chybějící SxxEyy cílenými WS dotazy.
@@ -5559,9 +5607,13 @@ def _fill_missing_episodes(
         a = (a or "").strip()
         if a and a not in match_names:
             match_names.append(a)
-    sub = _series_subtitle(series_name)
-    if sub and sub not in match_names:
-        match_names.append(sub)
+    for alias in _series_short_aliases(series_name):
+        if alias not in match_names:
+            match_names.append(alias)
+    for a in list(match_names):
+        for alias in _series_short_aliases(a):
+            if alias not in match_names:
+                match_names.append(alias)
 
     def _title_ok(detected: str) -> bool:
         return any(
@@ -5591,9 +5643,76 @@ def _fill_missing_episodes(
         series_name, len(targets), targets[:5],
     )
 
+    # Kratší alias první (Reacher před Jack Reacher) — WS fulltext
+    match_names = sorted(
+        match_names,
+        key=lambda n: (len(n.split()), len(n)),
+    )
+
     out = list(files)
     added = 0
+
+    def _ingest(batch: List[Dict[str, Any]], want_s: Optional[int] = None,
+                want_e: Optional[int] = None) -> int:
+        nonlocal added
+        got = 0
+        for f in batch:
+            name = f.get("name") or ""
+            ident = f.get("ident") or ""
+            if not ident or ident in seen_idents:
+                continue
+            s, e = None, None
+            for mn in match_names:
+                s, e = _parse_episode(name, mn)
+                if s is not None:
+                    break
+            if s is None or e is None:
+                continue
+            if want_s is not None and int(s) != int(want_s):
+                continue
+            if want_e is not None and int(e) != int(want_e):
+                continue
+            detected = _detect_series_from_episode_filename(name)
+            if not _title_ok(detected):
+                continue
+            f = dict(f)
+            f["_ep_season"] = int(s)
+            f["_ep_number"] = int(e)
+            out.append(f)
+            seen_idents.add(ident)
+            found.setdefault(int(s), set()).add(int(e))
+            added += 1
+            got += 1
+        return got
+
+    # 1) Hromadně po neúplných sezónách: 'Reacher S01' najde víc než S01E02
+    incomplete_seasons = sorted({s for s, _e in targets})
+    for s_num in incomplete_seasons:
+        if _shutdown.is_shutting_down():
+            break
+        for mn in match_names:
+            if _shutdown.is_shutting_down():
+                break
+            for q in (f"{mn} S{s_num:02d}", f"{mn} S{s_num}"):
+                for sort_mode in ("rating", "recent"):
+                    for page in (1, 2):
+                        if _shutdown.is_shutting_down():
+                            break
+                        batch = search_videos(
+                            query=q, sort=sort_mode, page=page,
+                        ) or []
+                        if not batch:
+                            break
+                        _ingest(batch, want_s=s_num)
+
+    # Přepočítej zbývající díry po sezónním sweepu
+    still_missing: List[Tuple[int, int]] = []
     for s_num, e_num in targets:
+        if e_num not in found.get(s_num, set()):
+            still_missing.append((s_num, e_num))
+
+    # 2) Zbývající jednotlivé SxxEyy
+    for s_num, e_num in still_missing:
         if _shutdown.is_shutting_down():
             break
         se = f"S{s_num:02d}E{e_num:02d}"
@@ -5601,6 +5720,7 @@ def _fill_missing_episodes(
         for mn in match_names:
             queries.append(f"{mn} {se}")
             queries.append(f"{mn} S{s_num}E{e_num}")
+            queries.append(f"{mn} {s_num}x{e_num:02d}")
         hit = False
         for q in queries:
             if _shutdown.is_shutting_down() or hit:
@@ -5608,30 +5728,8 @@ def _fill_missing_episodes(
             batch = search_videos(query=q, sort="rating", page=1) or []
             if not batch:
                 batch = search_videos(query=q, sort="recent", page=1) or []
-            for f in batch:
-                name = f.get("name") or ""
-                ident = f.get("ident") or ""
-                if not ident or ident in seen_idents:
-                    continue
-                s, e = _parse_episode(name, series_name)
-                if s is None or e is None:
-                    continue
-                if (int(s), int(e)) != (s_num, e_num):
-                    continue
-                detected = _detect_series_from_episode_filename(name)
-                if not _title_ok(detected):
-                    continue
-                f = dict(f)
-                f["_ep_season"] = s_num
-                f["_ep_number"] = e_num
-                out.append(f)
-                seen_idents.add(ident)
-                found.setdefault(s_num, set()).add(e_num)
-                added += 1
+            if _ingest(batch, want_s=s_num, want_e=e_num):
                 hit = True
-                break
-        if hit:
-            continue
 
     if added:
         classify_files(out)
@@ -5853,7 +5951,7 @@ def get_series_seasons(series_name: str,
     ]
     alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v4:{_norm_compare(series_name)}"
+        f"series_seasons:v5:{_norm_compare(series_name)}"
         f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5868,6 +5966,10 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v3:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v13:{_norm_compare(series_name)}")
+            cache.cache_clear_prefix(
+                f"episodes_files:v12:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
                 f"episodes_files:v11:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -5984,7 +6086,7 @@ def get_series_seasons(series_name: str,
                 if len(files) > before:
                     try:
                         ep_cache = (
-                            f"episodes_files:v11:{_norm_compare(series_name)}"
+                            f"episodes_files:v13:{_norm_compare(series_name)}"
                             f":{'s' if (fairy and fairy.get('strict')) else 'n'}"
                             f":{classic_year or 0}:{alt_key}"
                         )

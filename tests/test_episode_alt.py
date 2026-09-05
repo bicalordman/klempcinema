@@ -109,6 +109,16 @@ class TestEpisodeAltParse(unittest.TestCase):
         self.assertFalse(aws._episode_file_matches_series(
             "Big.City.Greens.S05E10.1080p.mkv", series, 5, 10))
 
+    def test_jack_reacher_short_ws_name(self):
+        self.assertTrue(aws._series_title_match_for_episodes(
+            "Jack Reacher", "Reacher"))
+        self.assertTrue(aws._episode_file_matches_series(
+            "Reacher.S01E03.1080p.WEB.mkv", "Jack Reacher", 1, 3))
+        self.assertIn("Reacher", aws._series_short_aliases("Jack Reacher"))
+        # Nesmí zkrátit Walking Dead na Dead
+        self.assertFalse(aws._series_title_match_for_episodes(
+            "The Walking Dead", "Dead"))
+
     def test_dead_city_quality_picker_rejects_main_twd(self):
         base = "The Walking Dead: Dead City S03E01"
         variants = [
