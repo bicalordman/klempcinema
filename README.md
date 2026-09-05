@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.171**
+**Aktuální verze: 0.0.173**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.171.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.173.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -197,6 +197,17 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.173 — Seriály: doplnění chybějících dílů
+
+- Po TMDB šabloně cílené WS dotazy `Dead City S01E02` atd. (ne jen obecný název)
+- Méně prázdných děr v S01/S02 u spin-offů
+
+### v0.0.172 — Seriály: správný díl + stabilní počty
+
+- Klik na S05E14 už neotevírá cizí díl (base vždy kanonický název + S/E ze seznamu)
+- Aktualizovat: počty dílů už neskáčou kvůli early-abort po 30 souborech
+- Spin-offy jako Walking Dead: Dead City lépe matchují krátké WS názvy („Dead City“)
 
 ### v0.0.171 — Picker kvality: kodek + zvuk
 

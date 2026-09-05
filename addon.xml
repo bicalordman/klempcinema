@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.171"
+       version="0.0.173"
        provider-name="Bicalorman">
 
     <requires>
@@ -24,7 +24,7 @@
         <source>https://github.com/bicalordman/klempcinema</source>
         <forum>https://github.com/bicalordman/klempcinema/issues</forum>
         <website>https://github.com/bicalordman/klempcinema</website>
-        <news>v0.0.171 Picker: [1080p BluRay] [HEVC] [Atmos] [CZ dab] GB — kodek/zvuk i ze streamu kdyz chybi v nazvu.</news>
+        <news>v0.0.173 Serialy: cilene hledani chybejicich dilu (Dead City S01/S02); bez Big City Greens.</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

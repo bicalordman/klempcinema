@@ -1735,8 +1735,38 @@ _CZ_TITLE_FILLER = frozenset({
 })
 
 
+# Franšízy, kde krátký název (Walking Dead) nesmí matchovat spin-off (Dead City).
+_FRANCHISE_CORE_TOKENS = (
+    frozenset({"walking", "dead"}),
+)
+# „the“ / překlep „th“ nepatří do spin-off tokenů (Th Walking Dead Dead City)
+_FRANCHISE_NOISE_TOKENS = _SEARCH_STOPWORDS | frozenset({"th"})
+
+
+def _franchise_meaningful_tokens(s: str) -> set:
+    return {
+        t for t in _title_meaningful_tokens(s)
+        if t not in _FRANCHISE_NOISE_TOKENS
+    }
+
+
 def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
     """Shoda pro epizody — Survivor SK tagy, ale ne spin-off (Bachelor in Paradise)."""
+    if not requested or not detected:
+        return False
+
+    # Spin-off guard: "The Walking Dead: Dead City" nesmí přijmout hlavní TWD /
+    # Daryl Dixon jen proto, že sdílí "Walking Dead" (+ vysokou similarity).
+    req_tok = _franchise_meaningful_tokens(requested)
+    det_tok = _franchise_meaningful_tokens(detected)
+    if req_tok and det_tok:
+        for core in _FRANCHISE_CORE_TOKENS:
+            if core.issubset(req_tok):
+                extra = req_tok - core
+                if extra and not extra.issubset(det_tok):
+                    return False
+                break
+
     if _series_title_match(requested, detected):
         return True
 
@@ -1773,7 +1803,34 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
                 and (extras & _CZ_TITLE_FILLER)
             ):
                 return True
+    # Spin-off / podtitul: "The Walking Dead: Dead City" ↔ WS "Dead City"
+    # Celý podtitul (min. 2 tokeny) — samotné "city" nesmí chytit Big City Greens.
+    sub = _series_subtitle(requested)
+    if sub:
+        sub_tok = _franchise_meaningful_tokens(sub)
+        if len(sub_tok) >= 2 and sub_tok.issubset(det_tok):
+            return True
+        if _series_title_match(sub, detected) or _title_tokens_match(sub, detected):
+            return True
+    # Bez dvojtečky: "Walking Dead Dead City" ↔ soubor s franchise + spin-off tokeny
+    # Vyžaduj buď celý název (core+extra), nebo spin-off o ≥2 tokenech (dead+city).
+    if req_tok and det_tok:
+        for core in _FRANCHISE_CORE_TOKENS:
+            if core.issubset(req_tok):
+                extra = req_tok - core
+                if not extra:
+                    break
+                if core.issubset(det_tok) and extra.issubset(det_tok):
+                    return True
+                if len(extra) >= 2 and extra.issubset(det_tok):
+                    return True
+                # Dead City: extra je často jen {city}, ale spin = {dead, city}
+                spin = frozenset({"dead", "city"})
+                if extra == frozenset({"city"}) and spin.issubset(det_tok):
+                    return True
+                break
     # Preklep / diakritika (Ruza vs Ruža) — jen vysoka podobnost
+    # (po franchise guardu — hlavní TWD už neprojde u Dead City)
     try:
         from .title_match import title_similarity
         if title_similarity(requested, detected) >= 0.88:
@@ -1781,6 +1838,17 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
     except Exception:  # noqa: BLE001
         pass
     return False
+
+
+def _series_subtitle(title: str) -> str:
+    """Podtitul za dvojtečkou / pomlčkou — 'The Walking Dead: Dead City' → 'Dead City'."""
+    if not title:
+        return ""
+    parts = re.split(r"\s*[:–—]\s*|\s+-\s+", title, maxsplit=1)
+    if len(parts) != 2:
+        return ""
+    sub = (parts[1] or "").strip()
+    return sub if len(sub) >= 3 else ""
 
 
 def _parse_episode_base(
@@ -5145,7 +5213,7 @@ def _collect_episodes_files(series_name: str,
         sorted({_norm_compare(a) for a in (alt_names or []) if (a or "").strip()})
     )
     cache_key = (
-        f"episodes_files:v10:{_norm_compare(series_name)}"
+        f"episodes_files:v11:{_norm_compare(series_name)}"
         f":{'s' if strict else 'n'}:{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5214,11 +5282,23 @@ def _collect_episodes_files(series_name: str,
                 if two not in queries:
                     queries.append(two)
         if len(words) >= 2 and words[0] not in queries:
-            queries.append(words[0])
+            # "The" / "A" jako samostatný dotaz je spam — Webshare vrací bordel
+            if words[0].lower() not in _WEAK_SECOND and len(words[0]) >= 3:
+                queries.append(words[0])
         if folded and folded != series_name:
             fwords = [w for w in re.split(r"\s+", folded.strip()) if w]
-            if fwords and fwords[0] not in queries:
+            if (
+                fwords
+                and fwords[0] not in queries
+                and fwords[0].lower() not in _WEAK_SECOND
+                and len(fwords[0]) >= 3
+            ):
                 queries.append(fwords[0])
+
+        # Spin-off podtitul (Dead City) — často lepší WS hit než celý EN název
+        sub = _series_subtitle(series_name)
+        if sub and sub not in queries:
+            queries.append(sub)
 
     # v0.0.68: dva sort modes per query
     # - rating: nejstaženější varianty (staré dily v hi-quality)
@@ -5348,12 +5428,16 @@ def _collect_episodes_files(series_name: str,
                     break
         log.info("_collect_episodes_files: query[%d]=%r -> %d novych souboru",
                  qi, q, new_in_this_query)
-        # Pokud první query (= plný název) nevrátil nic, zkusíme další.
-        # Pokud první VRÁTIL něco, ale ne moc, taky pokračujeme - širší query
-        # může přinést další ripy se stejnou epizodou v jiné kvalitě.
-        if qi == 0 and not strict and len(all_files) >= 30:
-            # Máme dost - nemusíme zkoušet další (širší) queries.
-            break
+        # Early-abort jen podle unikátních SxxEyy (ne podle počtu souborů).
+        # Drive: len(all_files)>=30 ukončilo po 1. query → skákající 5/20, 18/20, 0.
+        if qi == 0 and not strict:
+            unique_se = {
+                (f.get("_ep_season"), f.get("_ep_number"))
+                for f in all_files
+                if f.get("_ep_season") is not None and f.get("_ep_number") is not None
+            }
+            if len(unique_se) >= 80:
+                break
         if strict and max_ep_cap:
             found_n = len({
                 int(f["_ep_number"])
@@ -5436,6 +5520,149 @@ def _collect_episodes_files(series_name: str,
         except Exception as exc:  # noqa: BLE001
             log.debug("cache_delete empty %s: %s", cache_key, exc)
     return all_files
+
+
+def _fill_missing_episodes(
+    files: List[Dict[str, Any]],
+    series_name: str,
+    tmdb_seasons: List[Dict[str, Any]],
+    alt_names: Optional[List[str]] = None,
+    *,
+    max_targets: int = 24,
+) -> List[Dict[str, Any]]:
+    """
+    Doplní chybějící SxxEyy cílenými WS dotazy.
+
+    Obecný search často vrátí jen populární sezónu (Dead City S03),
+    starší díly najde až 'Dead City S01E02' apod.
+    """
+    if not files or not series_name or not tmdb_seasons:
+        return files
+    if _shutdown.is_shutting_down():
+        return files
+
+    found: Dict[int, set] = {}
+    seen_idents: set = set()
+    for f in files:
+        ident = f.get("ident") or ""
+        if ident:
+            seen_idents.add(ident)
+        try:
+            s = int(f.get("_ep_season"))
+            e = int(f.get("_ep_number"))
+        except (TypeError, ValueError):
+            continue
+        found.setdefault(s, set()).add(e)
+
+    match_names: List[str] = [series_name]
+    for a in (alt_names or []):
+        a = (a or "").strip()
+        if a and a not in match_names:
+            match_names.append(a)
+    sub = _series_subtitle(series_name)
+    if sub and sub not in match_names:
+        match_names.append(sub)
+
+    def _title_ok(detected: str) -> bool:
+        return any(
+            _series_title_match_for_episodes(mn, detected) for mn in match_names
+        )
+
+    targets: List[Tuple[int, int]] = []
+    for tm in tmdb_seasons:
+        try:
+            s_num = int(tm.get("season_number") or 0)
+            expected = int(tm.get("episode_count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if s_num <= 0 or expected <= 0:
+            continue
+        have = found.get(s_num, set())
+        for e_num in range(1, expected + 1):
+            if e_num not in have:
+                targets.append((s_num, e_num))
+
+    if not targets:
+        return files
+
+    targets = targets[:max_targets]
+    log.info(
+        "_fill_missing_episodes(%r): cilim %d chybějících (např. %s)",
+        series_name, len(targets), targets[:5],
+    )
+
+    out = list(files)
+    added = 0
+    for s_num, e_num in targets:
+        if _shutdown.is_shutting_down():
+            break
+        se = f"S{s_num:02d}E{e_num:02d}"
+        queries = []
+        for mn in match_names:
+            queries.append(f"{mn} {se}")
+            queries.append(f"{mn} S{s_num}E{e_num}")
+        hit = False
+        for q in queries:
+            if _shutdown.is_shutting_down() or hit:
+                break
+            batch = search_videos(query=q, sort="rating", page=1) or []
+            if not batch:
+                batch = search_videos(query=q, sort="recent", page=1) or []
+            for f in batch:
+                name = f.get("name") or ""
+                ident = f.get("ident") or ""
+                if not ident or ident in seen_idents:
+                    continue
+                s, e = _parse_episode(name, series_name)
+                if s is None or e is None:
+                    continue
+                if (int(s), int(e)) != (s_num, e_num):
+                    continue
+                detected = _detect_series_from_episode_filename(name)
+                if not _title_ok(detected):
+                    continue
+                f = dict(f)
+                f["_ep_season"] = s_num
+                f["_ep_number"] = e_num
+                out.append(f)
+                seen_idents.add(ident)
+                found.setdefault(s_num, set()).add(e_num)
+                added += 1
+                hit = True
+                break
+        if hit:
+            continue
+
+    if added:
+        classify_files(out)
+        log.info("_fill_missing_episodes(%r): doplneno %d souboru",
+                 series_name, added)
+    return out
+
+
+def _recount_ws_seasons(
+    files: List[Dict[str, Any]],
+    series_name: str,
+    curated_map=None,
+) -> Tuple[Dict[int, int], Dict[int, set]]:
+    """Přepočítá ws_season_counts / ws_episodes_per_season ze souborů."""
+    ws_episodes_per_season: Dict[int, set] = {}
+    for f in files:
+        if f.get("_ep_season") is not None and f.get("_ep_number") is not None:
+            try:
+                s, e = int(f["_ep_season"]), int(f["_ep_number"])
+            except (TypeError, ValueError):
+                s, e = _parse_episode(f.get("name") or "", series_name)
+        else:
+            s, e = _parse_episode(f.get("name") or "", series_name)
+        if s is None or e is None:
+            continue
+        if curated_map is not None:
+            if int(s) not in curated_map or int(e) not in curated_map.get(int(s), {}):
+                continue
+        ws_episodes_per_season.setdefault(int(s), set()).add(int(e))
+    ws_season_counts = {s: len(eps) for s, eps in ws_episodes_per_season.items()}
+    return ws_season_counts, ws_episodes_per_season
 
 
 def _kids_title_in_name(title: str, filename: str) -> bool:
@@ -5539,11 +5766,15 @@ def _episode_base_for_series(
     series_name: str,
     season: int,
     episode: int,
-    filename: str,
+    filename: str = "",
 ) -> str:
-    """Stabilní base_title pro play_pick — SxxEyy z názvu nebo syntetický."""
-    if _parse_se(filename)[0] is not None:
-        return _episode_base_title(filename)
+    """
+    Stabilní base_title pro play_pick.
+
+    Vždy kanonický název seriálu + S/E ze seskupení (ne z filename).
+    Filename může mít jiný/první SxxEyy marker (multipack) → špatný díl v pickeru.
+    """
+    _ = filename  # zpětná kompatibilita volání
     return f"{series_name.strip()} S{int(season):02d}E{int(episode):02d}"
 
 
@@ -5622,7 +5853,7 @@ def get_series_seasons(series_name: str,
     ]
     alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v3:{_norm_compare(series_name)}"
+        f"series_seasons:v4:{_norm_compare(series_name)}"
         f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5637,6 +5868,8 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v3:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v11:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
                 f"episodes_files:v10:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -5742,6 +5975,25 @@ def get_series_seasons(series_name: str,
         )
         if tmdb_id and curated_map is None and not continuous:
             tmdb_seasons = tmdb_tv_api.get_seasons(tmdb_id)
+            # Cílené SxxEyy — obecný search často vynechá starší díly (Dead City S01/S02)
+            if tmdb_seasons:
+                before = len(files)
+                files = _fill_missing_episodes(
+                    files, series_name, tmdb_seasons, alt_names=alt_clean,
+                )
+                if len(files) > before:
+                    try:
+                        ep_cache = (
+                            f"episodes_files:v11:{_norm_compare(series_name)}"
+                            f":{'s' if (fairy and fairy.get('strict')) else 'n'}"
+                            f":{classic_year or 0}:{alt_key}"
+                        )
+                        cache.cache_set(ep_cache, files)
+                    except Exception:  # noqa: BLE001
+                        pass
+                ws_season_counts, ws_episodes_per_season = _recount_ws_seasons(
+                    files, series_name, curated_map,
+                )
         elif tmdb_id:
             pass
     except Exception as exc:  # noqa: BLE001
@@ -5988,10 +6240,17 @@ def get_series_episodes(series_name: str,
         best = variants[0]
         is_dubbed = any(_detect_dubbed(v.get("name") or "") for v in variants)
         fname = best.get("name") or ""
-        s_num, e_num = _file_se(fs[0])
-        if s_num is None:
-            s_num, e_num = _parse_episode(fname, series_name)
-        base = _episode_base_for_series(series_name, s_num or 1, e_num or 1, fname)
+        # ep_key ze seskupení je autoritativní (S05E14), ne první marker ve filename
+        m_key = re.match(r"S(\d{1,2})E(\d{1,4})$", ep_key, re.I)
+        if m_key:
+            s_num, e_num = int(m_key.group(1)), int(m_key.group(2))
+        else:
+            s_num, e_num = _file_se(fs[0])
+            if s_num is None:
+                s_num, e_num = _parse_episode(fname, series_name)
+        base = _episode_base_for_series(
+            series_name, s_num or 1, e_num or 1, fname,
+        )
 
         _save_variants_cache(base, "episode", variants)
 
@@ -6129,11 +6388,19 @@ def get_quality_variants(
     cached = _load_variants_cache(base_title, mode=mode, ttl=24 * 3600)
 
     # 2) Expand: pokud cache ma malo variant, doplnime plny WS re-search.
+    # U epizod: i „tlustý“ cache projde filtrem — když zbude 0 (cizí SxxEyy),
+    # pokračujeme re-searchem (issue #4).
     if cached and len(cached) >= _VARIANTS_CACHE_MIN_EXPAND:
-        log.info("get_quality_variants(base=%r, mode=%s): cache HIT (%d variant) "
-                 "- dostatecne, neprovadime expand",
+        finalized = _finalize(cached)
+        if mode != "episode" or finalized:
+            log.info("get_quality_variants(base=%r, mode=%s): cache HIT (%d variant) "
+                     "- dostatecne, neprovadime expand",
+                     base_title, mode, len(cached))
+            return finalized
+        log.info("get_quality_variants(base=%r, mode=%s): cache HIT (%d) po filtru 0 "
+                 "- re-search",
                  base_title, mode, len(cached))
-        return _finalize(cached)
+        cached = []
 
     if cached:
         log.info("get_quality_variants(base=%r, mode=%s): cache HIT (%d variant) "
@@ -6141,10 +6408,7 @@ def get_quality_variants(
                  base_title, mode, len(cached))
 
     # 3) Re-search na Webshare (full miss nebo thin expand).
-    # Pro epizodu: hledat 'Series Name SxxEyy' může vrátit málo výsledků
-    # (Webshare full-text neumí dobře s tečkami/mezerami). Zkusíme proto
-    # raději hledat jen 'Series Name' (= víc kandidátů) a pak je filtrujeme
-    # lokálně podle SxxEyy markeru a porovnání base_title.
+    # Pro epizodu: nejdřív cílené SxxEyy, pak širší název seriálu.
     target = _norm_compare(base_title)
     episode_series = ""
     episode_se: Optional[Tuple[int, int]] = None
@@ -6155,11 +6419,11 @@ def get_quality_variants(
             s_num, e_num = episode_se
             log.info("get_quality_variants(episode): query='%s' (z base=%r)",
                      episode_series, base_title)
-            # v0.0.164: multi-query jako u filmů (ne jen 1 WS page)
+            # Cílené SE první — méně cizích dílů ve výsledcích
             ep_queries = [
-                episode_series,
                 f"{episode_series} S{s_num:02d}E{e_num:02d}",
                 f"{episode_series} S{s_num}E{e_num}",
+                episode_series,
                 f"{episode_series} dil {e_num}",
                 f"{episode_series} epizoda {e_num}",
             ]

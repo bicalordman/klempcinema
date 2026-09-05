@@ -75,10 +75,50 @@ class TestEpisodeAltParse(unittest.TestCase):
         )
         self.assertEqual(base, "Ruza pre nevestu S01E01")
 
-    def test_sxxeyy_base_from_filename(self):
+    def test_sxxeyy_base_uses_canonical_series(self):
         name = "GoT.S01E03.1080p.mkv"
         base = aws._episode_base_for_series("Game of Thrones", 1, 3, name)
-        self.assertIn("S01E03", base)
+        self.assertEqual(base, "Game of Thrones S01E03")
+
+    def test_multipack_filename_keeps_grouped_se(self):
+        # Filename má první marker S01E08, ale seskupení říká S05E14
+        name = "Show.S01E08.extra.S05E14.mkv"
+        base = aws._episode_base_for_series("My Show", 5, 14, name)
+        self.assertEqual(base, "My Show S05E14")
+        self.assertNotIn("S01E08", base)
+
+    def test_dead_city_short_ws_name(self):
+        series = "The Walking Dead: Dead City"
+        self.assertTrue(aws._series_title_match_for_episodes(series, "Dead City"))
+        self.assertTrue(aws._series_title_match_for_episodes(
+            series, "The Walking Dead Dead City"))
+        # Hlavní TWD / Daryl Dixon nesmí projít do Dead City pickeru
+        self.assertFalse(aws._series_title_match_for_episodes(
+            "The Walking Dead", "Dead City"))
+        self.assertFalse(aws._series_title_match_for_episodes(
+            series, "The Walking Dead"))
+        self.assertFalse(aws._series_title_match_for_episodes(
+            series, "The Walking Dead Daryl Dixon"))
+        self.assertFalse(aws._series_title_match_for_episodes(
+            series, "Fear the Walking Dead"))
+        # Samotné "City" nesmí chytit kreslený Big City Greens / Sex and the City
+        self.assertFalse(aws._series_title_match_for_episodes(
+            series, "Big City Greens"))
+        self.assertFalse(aws._series_title_match_for_episodes(
+            series, "Sex and the City"))
+        self.assertFalse(aws._episode_file_matches_series(
+            "Big.City.Greens.S05E10.1080p.mkv", series, 5, 10))
+
+    def test_dead_city_quality_picker_rejects_main_twd(self):
+        base = "The Walking Dead: Dead City S03E01"
+        variants = [
+            {"name": "The.Walking.Dead.Dead.City.S03E01.1080p.CZ.mkv", "ident": "a"},
+            {"name": "The.Walking.Dead.S03E01.1080p.BluRay.mkv", "ident": "b"},
+            {"name": "The.Walking.Dead.Daryl.Dixon.S03E01.mkv", "ident": "c"},
+        ]
+        out = aws._filter_episode_variants(variants, base)
+        self.assertEqual(len(out), 1)
+        self.assertIn("Dead.City", out[0]["name"])
 
     def test_ordinace_abbrev_title_match(self):
         series = "Ordinace v růžové zahradě"
