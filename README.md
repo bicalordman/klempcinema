@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.177**
+**Aktuální verze: 0.0.178**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.177.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.178.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -197,6 +197,12 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.178 — Dual-pack epizody + Reacher search
+
+- ``Reacher.S03E01E02`` už nepadá na title match (fix ``clean_series_name``)
+- Multipack / rozsah ``E05-E08`` se započítá do všech dílů
+- Hledání preferuje alias ``Reacher`` místo spamového ``Jack``
 
 ### v0.0.177 — Oprava aliasu Reacher ↔ Jack Reacher
 

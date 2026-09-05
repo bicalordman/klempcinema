@@ -147,8 +147,17 @@ _GROUP_RE = re.compile(
 )
 
 # SxxEyy patterny (s01e02, S01E02, 1x02, 01x02).
-_SE_RE = re.compile(r"\b[Ss](\d{1,2})\s*[EeXx]\s*(\d{1,3})\b")
-_SE_ALT_RE = re.compile(r"\b(\d{1,2})\s*[xX]\s*(\d{1,3})\b")
+# Bez trailing \b: WS často lepí dual-pack „S03E01E02“ jako jedno slovo —
+# \b po E01 selže (digit|letter není hranice) a clean_series_name nechá
+# v názvu „Reacher S03E01E02“ → title match padá.
+_SE_RE = re.compile(
+    r"(?<![A-Za-z0-9])[Ss](\d{1,2})\s*[EeXx]\s*(\d{1,3})"
+    r"(?:\s*[EeXx]\s*\d{1,3})*"
+    r"(?![0-9A-Za-z])"
+)
+_SE_ALT_RE = re.compile(
+    r"(?<![A-Za-z0-9])(\d{1,2})\s*[xX]\s*(\d{1,3})(?![0-9A-Za-z])"
+)
 
 
 # ---------------------------------------------------------------------------

@@ -121,6 +121,19 @@ class TestEpisodeAltParse(unittest.TestCase):
         self.assertFalse(aws._series_title_match_for_episodes(
             "The Walking Dead", "Dead"))
 
+    def test_dual_episode_pack_title_and_expand(self):
+        name = "Reacher.S03E01E02.1080p.WEB.mkv"
+        self.assertEqual(aws._series_name(name), "Reacher")
+        self.assertTrue(aws._series_title_match_for_episodes(
+            "Jack Reacher", aws._series_name(name)))
+        self.assertEqual(aws._parse_all_episodes(name), (3, [1, 2]))
+        self.assertEqual(
+            aws._parse_all_episodes("Reacher.S01E05-E08.mkv"),
+            (1, [5, 6, 7, 8]),
+        )
+        self.assertTrue(aws._episode_file_matches_series(
+            name, "Jack Reacher", 3, 1))
+
     def test_dead_city_quality_picker_rejects_main_twd(self):
         base = "The Walking Dead: Dead City S03E01"
         variants = [

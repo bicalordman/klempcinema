@@ -5279,7 +5279,7 @@ def _collect_episodes_files(series_name: str,
         sorted({_norm_compare(a) for a in (alt_names or []) if (a or "").strip()})
     )
     cache_key = (
-        f"episodes_files:v14:{_norm_compare(series_name)}"
+        f"episodes_files:v15:{_norm_compare(series_name)}"
         f":{'s' if strict else 'n'}:{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5349,8 +5349,10 @@ def _collect_episodes_files(series_name: str,
                     queries.append(two)
         if len(words) >= 2 and words[0] not in queries:
             # "The" / "A" jako samostatný dotaz je spam — Webshare vrací bordel
+            # "Jack" u Jack Reacher taky — preferuj krátký alias (Reacher).
             if words[0].lower() not in _WEAK_SECOND and len(words[0]) >= 3:
-                queries.append(words[0])
+                if not _series_short_aliases(series_name):
+                    queries.append(words[0])
         if folded and folded != series_name:
             fwords = [w for w in re.split(r"\s+", folded.strip()) if w]
             if (
@@ -5358,6 +5360,7 @@ def _collect_episodes_files(series_name: str,
                 and fwords[0] not in queries
                 and fwords[0].lower() not in _WEAK_SECOND
                 and len(fwords[0]) >= 3
+                and not _series_short_aliases(series_name)
             ):
                 queries.append(fwords[0])
 
@@ -5391,6 +5394,12 @@ def _collect_episodes_files(series_name: str,
         if alias not in queries:
             queries.append(alias)
 
+    # Krátký alias hned za kanonickým názvem (Reacher před „Jack“ spamem)
+    short = _series_short_aliases(series_name)
+    if short:
+        rest = [q for q in queries if q != series_name and q not in short]
+        queries = [series_name] + [a for a in short if a != series_name] + rest
+
     def _parse_ep_any(fname: str) -> Tuple[Optional[int], Optional[int]]:
         for mn in match_names:
             s, e = _parse_episode(fname, mn)
@@ -5409,7 +5418,7 @@ def _collect_episodes_files(series_name: str,
                 return True
         return False
 
-    seen_idents: set = set()
+    seen_ep_keys: set = set()  # (ident, season, episode) — multipack = víc ep
     for qi, q in enumerate(queries):
         if _shutdown.is_shutting_down():
             log.info("_collect_episodes_files(%r): abort - koncim queries",
@@ -5437,29 +5446,32 @@ def _collect_episodes_files(series_name: str,
                     if strict and not _fairy_file_year_ok(name, classic_year):
                         continue
 
-                    s, e = _parse_ep_any(name)
-                    if s is None or e is None:
-                        # Curated: zkus párování podle názvu dílu ve filename
-                        if fairy and fairy.get("curated"):
-                            try:
-                                from . import czech_series_episodes as cse
-                                hit = cse.match_filename_to_episode(
-                                    series_name, name)
-                            except Exception:  # noqa: BLE001
-                                hit = None
-                            if hit:
-                                s, e = hit
+                    s, eps = _parse_all_episodes(name)
+                    if s is None or not eps:
+                        s_one, e_one = _parse_ep_any(name)
+                        if s_one is None or e_one is None:
+                            # Curated: zkus párování podle názvu dílu ve filename
+                            if fairy and fairy.get("curated"):
+                                try:
+                                    from . import czech_series_episodes as cse
+                                    hit = cse.match_filename_to_episode(
+                                        series_name, name)
+                                except Exception:  # noqa: BLE001
+                                    hit = None
+                                if hit:
+                                    s_one, e_one = hit
+                                else:
+                                    continue
                             else:
                                 continue
-                        else:
+                        s, eps = int(s_one), [int(e_one)]
+
+                    if max_ep_cap and int(s) == 1:
+                        eps = [e for e in eps if int(e) <= int(max_ep_cap)]
+                        if not eps:
                             continue
 
-                    if max_ep_cap and int(e) > int(max_ep_cap) and int(s) == 1:
-                        continue
-
                     ident = f.get("ident") or ""
-                    if ident in seen_idents:
-                        continue
                     if _parse_se(name)[0] is not None:
                         detected = _series_name(name)
                     else:
@@ -5487,14 +5499,19 @@ def _collect_episodes_files(series_name: str,
                     elif not _title_ok(detected):
                         continue
 
-                    # Ulož parsované S/E na soubor (pro get_series_episodes)
-                    f = dict(f)
-                    f["_ep_season"] = int(s)
-                    f["_ep_number"] = int(e)
-                    all_files.append(f)
-                    seen_idents.add(ident)
-                    added += 1
-                    new_in_this_query += 1
+                    for e in eps:
+                        ep_key = (ident, int(s), int(e))
+                        if ident and ep_key in seen_ep_keys:
+                            continue
+                        # Ulož parsované S/E na soubor (pro get_series_episodes)
+                        f_ep = dict(f)
+                        f_ep["_ep_season"] = int(s)
+                        f_ep["_ep_number"] = int(e)
+                        all_files.append(f_ep)
+                        if ident:
+                            seen_ep_keys.add(ep_key)
+                        added += 1
+                        new_in_this_query += 1
                 if added == 0 and p > 1:
                     break
         log.info("_collect_episodes_files: query[%d]=%r -> %d novych souboru",
@@ -5568,13 +5585,14 @@ def _collect_episodes_files(series_name: str,
                         if max_ep_cap and int(e) > int(max_ep_cap):
                             continue
                         ident = f.get("ident") or ""
-                        if not ident or ident in seen_idents:
+                        ep_key = (ident, 1, int(ep))
+                        if not ident or ep_key in seen_ep_keys:
                             continue
                         f = dict(f)
                         f["_ep_season"] = 1
                         f["_ep_number"] = int(ep)
                         all_files.append(f)
-                        seen_idents.add(ident)
+                        seen_ep_keys.add(ep_key)
                         hit_any = True
                     if hit_any:
                         break
@@ -5613,16 +5631,16 @@ def _fill_missing_episodes(
         return files
 
     found: Dict[int, set] = {}
-    seen_idents: set = set()
+    seen_ep_keys: set = set()
     for f in files:
         ident = f.get("ident") or ""
-        if ident:
-            seen_idents.add(ident)
         try:
             s = int(f.get("_ep_season"))
             e = int(f.get("_ep_number"))
         except (TypeError, ValueError):
             continue
+        if ident:
+            seen_ep_keys.add((ident, s, e))
         found.setdefault(s, set()).add(e)
 
     match_names: List[str] = [series_name]
@@ -5682,30 +5700,38 @@ def _fill_missing_episodes(
         for f in batch:
             name = f.get("name") or ""
             ident = f.get("ident") or ""
-            if not ident or ident in seen_idents:
-                continue
-            s, e = None, None
-            for mn in match_names:
-                s, e = _parse_episode(name, mn)
-                if s is not None:
-                    break
-            if s is None or e is None:
-                continue
+            s, eps = _parse_all_episodes(name)
+            if s is None or not eps:
+                s_one = e_one = None
+                for mn in match_names:
+                    s_one, e_one = _parse_episode(name, mn)
+                    if s_one is not None:
+                        break
+                if s_one is None or e_one is None:
+                    continue
+                s, eps = int(s_one), [int(e_one)]
             if want_s is not None and int(s) != int(want_s):
                 continue
-            if want_e is not None and int(e) != int(want_e):
-                continue
+            if want_e is not None:
+                eps = [e for e in eps if int(e) == int(want_e)]
+                if not eps:
+                    continue
             detected = _detect_series_from_episode_filename(name)
             if not _title_ok(detected):
                 continue
-            f = dict(f)
-            f["_ep_season"] = int(s)
-            f["_ep_number"] = int(e)
-            out.append(f)
-            seen_idents.add(ident)
-            found.setdefault(int(s), set()).add(int(e))
-            added += 1
-            got += 1
+            for e in eps:
+                ep_key = (ident, int(s), int(e))
+                if ident and ep_key in seen_ep_keys:
+                    continue
+                f_ep = dict(f)
+                f_ep["_ep_season"] = int(s)
+                f_ep["_ep_number"] = int(e)
+                out.append(f_ep)
+                if ident:
+                    seen_ep_keys.add(ep_key)
+                found.setdefault(int(s), set()).add(int(e))
+                added += 1
+                got += 1
         return got
 
     # 1) Hromadně po neúplných sezónách: 'Reacher S01' / 'Reacher.S01'
@@ -5822,14 +5848,58 @@ def _kids_title_in_name(title: str, filename: str) -> bool:
 
 def _parse_se(name: str) -> Tuple[Optional[int], Optional[int]]:
     """Z názvu vytáhne (season, episode) jako int, nebo (None, None)."""
-    m = _SERIES_PATTERN.search(name or "")
-    if not m:
+    s, eps = _parse_all_episodes(name)
+    if s is None or not eps:
         return None, None
+    return s, eps[0]
+
+
+def _parse_all_episodes(name: str) -> Tuple[Optional[int], List[int]]:
+    """
+    Všechny díly z markeru: S03E05 → [5], S03E01E02 → [1,2],
+    S03E05-E08 / S03E05-08 → [5..8].
+    """
+    if not name:
+        return None, []
+    # Rozsah nejdřív: S01E05-E08 / S01E05-08 (dřív než dual E01E02)
+    m = re.search(
+        r"(?<![A-Za-z0-9])[Ss](\d{1,2})\s*[EeXx]\s*(\d{1,3})"
+        r"\s*[-–]\s*[EeXx]?\s*(\d{1,3})(?![0-9A-Za-z])",
+        name,
+        re.I,
+    )
+    if m:
+        season = int(m.group(1))
+        a, b = int(m.group(2)), int(m.group(3))
+        if a > b:
+            a, b = b, a
+        if b - a > 24:
+            return season, [a]
+        return season, list(range(a, b + 1))
+    # Dual / multi: S01E01E02E03 (bez pomlčky — ta je rozsah výše)
+    m = re.search(
+        r"(?<![A-Za-z0-9])[Ss](\d{1,2})\s*[EeXx]\s*(\d{1,3})"
+        r"((?:[\s._]*[EeXx]\s*\d{1,3})+)",
+        name,
+        re.I,
+    )
+    if m:
+        season = int(m.group(1))
+        eps = [int(m.group(2))]
+        eps.extend(int(x) for x in re.findall(r"[EeXx]\s*(\d{1,3})", m.group(3)))
+        out: List[int] = []
+        for e in eps:
+            if 1 <= e <= 999 and e not in out:
+                out.append(e)
+        return season, out
+    m = _SERIES_PATTERN.search(name)
+    if not m:
+        return None, []
     raw = m.group(0).upper()
     m2 = re.match(r"S(\d+)\s*[EX]\s*(\d+)", raw, re.I)
     if not m2:
-        return None, None
-    return int(m2.group(1)), int(m2.group(2))
+        return None, []
+    return int(m2.group(1)), [int(m2.group(2))]
 
 
 # v0.0.119: Voyo / reality uploady bez SxxEyy ("Ruza pre nevestu epizoda 1").
@@ -5996,7 +6066,7 @@ def get_series_seasons(series_name: str,
     ]
     alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v6:{_norm_compare(series_name)}"
+        f"series_seasons:v7:{_norm_compare(series_name)}"
         f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -6011,6 +6081,8 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v3:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v15:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
                 f"episodes_files:v14:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -6133,7 +6205,7 @@ def get_series_seasons(series_name: str,
                 if len(files) > before:
                     try:
                         ep_cache = (
-                            f"episodes_files:v14:{_norm_compare(series_name)}"
+                            f"episodes_files:v15:{_norm_compare(series_name)}"
                             f":{'s' if (fairy and fairy.get('strict')) else 'n'}"
                             f":{classic_year or 0}:{alt_key}"
                         )
