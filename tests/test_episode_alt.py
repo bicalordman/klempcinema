@@ -134,6 +134,32 @@ class TestEpisodeAltParse(unittest.TestCase):
         self.assertTrue(aws._episode_file_matches_series(
             name, "Jack Reacher", 3, 1))
 
+    def test_season_complete_pack(self):
+        name = "Reacher.S03.COMPLETE.1080p.WEB.mkv"
+        self.assertEqual(aws._season_complete_number(name), 3)
+        self.assertEqual(
+            aws._normalize_detected_series_title(aws._series_name(name)),
+            "Reacher",
+        )
+        self.assertTrue(aws._series_title_match_for_episodes(
+            "Jack Reacher",
+            aws._normalize_detected_series_title(aws._series_name(name)),
+        ))
+        files = [{
+            "name": name,
+            "ident": "pack3",
+            "_ep_season_complete": 3,
+        }]
+        tmdb = [{"season_number": 3, "episode_count": 8}]
+        out = aws._expand_season_complete_packs(
+            files, "Jack Reacher", tmdb, match_names=["Jack Reacher", "Reacher"],
+        )
+        eps = sorted({
+            int(f["_ep_number"]) for f in out
+            if f.get("_ep_season") == 3 and f.get("_ep_number") is not None
+        })
+        self.assertEqual(eps, list(range(1, 9)))
+
     def test_dead_city_quality_picker_rejects_main_twd(self):
         base = "The Walking Dead: Dead City S03E01"
         variants = [

@@ -1930,15 +1930,151 @@ def _parse_episode_base(
 def _detect_series_from_episode_filename(filename: str) -> str:
     """Seriál z WS názvu epizody — stejná logika jako _collect_episodes_files."""
     if _parse_se(filename)[0] is not None:
-        return _series_name(filename)
-    return _ct.clean_title(
-        re.split(
-            r"epizod[a]?|d[ií]l|diel|č[aá]st|cast",
-            filename,
-            maxsplit=1,
-            flags=re.I,
-        )[0],
-    ) or _series_name(filename)
+        raw = _series_name(filename)
+    else:
+        raw = _ct.clean_title(
+            re.split(
+                r"epizod[a]?|d[ií]l|diel|č[aá]st|cast",
+                filename,
+                maxsplit=1,
+                flags=re.I,
+            )[0],
+        ) or _series_name(filename)
+    return _normalize_detected_series_title(raw)
+
+
+# Season pack bez Eyy: "Reacher.S03.COMPLETE", "Reacher Season 3 Komplet"
+_SEASON_COMPLETE_HINT_RE = re.compile(
+    r"(?i)(?:complete|komplet|full[\s._-]*season|season[\s._-]*pack|\bpack\b)",
+)
+_SEASON_ONLY_RE = re.compile(
+    r"(?i)(?:season|s[eé]rie|sezona|sezóna)[\s._-]*(\d{1,2})"
+    r"|(?<![A-Za-z0-9])S(\d{1,2})(?![0-9A-Za-zEeXx])",
+)
+_DETECTED_SERIES_NOISE_RE = re.compile(
+    r"(?i)\b(?:season|s[eé]rie|sezona|sezóna)\s*\d{1,2}\b"
+    r"|\bS\d{1,2}\b"
+    r"|\b(?:complete|komplet|pack)\b",
+)
+
+
+def _normalize_detected_series_title(detected: str) -> str:
+    """'Reacher S03' / 'Reacher Season 3 Complete' → 'Reacher'."""
+    if not detected:
+        return ""
+    d = _DETECTED_SERIES_NOISE_RE.sub(" ", detected)
+    return re.sub(r"\s+", " ", d).strip(" .-_")
+
+
+def _season_complete_number(name: str) -> Optional[int]:
+    """
+    Číslo sezóny u COMPLETE/pack souboru bez SxxEyy.
+    None = není season pack (nebo už má konkrétní epizodu).
+    """
+    if not name or _parse_se(name)[0] is not None:
+        return None
+    if not _SEASON_COMPLETE_HINT_RE.search(name):
+        return None
+    m = _SEASON_ONLY_RE.search(name)
+    if not m:
+        return None
+    raw = m.group(1) or m.group(2)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if 1 <= n <= 99 else None
+
+
+def _expand_season_complete_packs(
+    files: List[Dict[str, Any]],
+    series_name: str,
+    tmdb_seasons: List[Dict[str, Any]],
+    match_names: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    COMPLETE pack sezóny → chybějící SxxEyy se započítají na stejný soubor.
+    Jinak 'Reacher.S03.COMPLETE' zmizí (není Eyy) a UI ukáže 4/8.
+    """
+    if not files or not series_name or not tmdb_seasons:
+        return files
+
+    names = list(match_names or [])
+    if series_name not in names:
+        names.insert(0, series_name)
+    for alias in _series_short_aliases(series_name):
+        if alias not in names:
+            names.append(alias)
+
+    def _title_ok(detected: str) -> bool:
+        return any(
+            _series_title_match_for_episodes(mn, detected) for mn in names
+        )
+
+    expected_by_s: Dict[int, int] = {}
+    for tm in tmdb_seasons:
+        try:
+            s_num = int(tm.get("season_number") or 0)
+            expected = int(tm.get("episode_count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if s_num > 0 and expected > 0:
+            expected_by_s[s_num] = expected
+
+    found: Dict[int, set] = {}
+    seen_ep_keys: set = set()
+    for f in files:
+        ident = f.get("ident") or ""
+        try:
+            s = int(f.get("_ep_season"))
+            e = int(f.get("_ep_number"))
+        except (TypeError, ValueError):
+            continue
+        found.setdefault(s, set()).add(e)
+        if ident:
+            seen_ep_keys.add((ident, s, e))
+
+    out = list(files)
+    added = 0
+    for f in files:
+        name = f.get("name") or ""
+        ident = f.get("ident") or ""
+        s_pack = f.get("_ep_season_complete")
+        if s_pack is None:
+            s_pack = _season_complete_number(name)
+        try:
+            s_pack = int(s_pack) if s_pack is not None else None
+        except (TypeError, ValueError):
+            s_pack = None
+        if not s_pack or s_pack not in expected_by_s:
+            continue
+        detected = _normalize_detected_series_title(
+            _detect_series_from_episode_filename(name) or _series_name(name)
+        )
+        if not _title_ok(detected):
+            continue
+        have = found.setdefault(s_pack, set())
+        for e in range(1, expected_by_s[s_pack] + 1):
+            if e in have:
+                continue
+            ep_key = (ident, s_pack, e)
+            if ident and ep_key in seen_ep_keys:
+                continue
+            f_ep = dict(f)
+            f_ep["_ep_season"] = s_pack
+            f_ep["_ep_number"] = e
+            f_ep["_ep_from_complete_pack"] = True
+            out.append(f_ep)
+            have.add(e)
+            if ident:
+                seen_ep_keys.add(ep_key)
+            added += 1
+    if added:
+        log.info(
+            "_expand_season_complete_packs(%r): doplneno %d slotu z COMPLETE",
+            series_name, added,
+        )
+    return out
 
 
 def _episode_file_matches_series(
@@ -1950,9 +2086,16 @@ def _episode_file_matches_series(
     """SxxEyy + shoda názvu seriálu (ne cizí serial se stejným číslem dílu)."""
     s, e = _parse_episode(filename, series_name)
     if s is None or e is None:
-        return False
+        s_pack = _season_complete_number(filename)
+        if s_pack is None or int(s_pack) != int(season):
+            return False
+        detected = _detect_series_from_episode_filename(filename)
+        return _series_title_match_for_episodes(series_name, detected)
     if (int(s), int(e)) != (int(season), int(episode)):
-        return False
+        # Dual-pack S03E01E02 pokrývá oba díly
+        _s2, eps = _parse_all_episodes(filename)
+        if _s2 is None or int(_s2) != int(season) or int(episode) not in eps:
+            return False
     detected = _detect_series_from_episode_filename(filename)
     return _series_title_match_for_episodes(series_name, detected)
 
@@ -5279,7 +5422,7 @@ def _collect_episodes_files(series_name: str,
         sorted({_norm_compare(a) for a in (alt_names or []) if (a or "").strip()})
     )
     cache_key = (
-        f"episodes_files:v15:{_norm_compare(series_name)}"
+        f"episodes_files:v16:{_norm_compare(series_name)}"
         f":{'s' if strict else 'n'}:{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5447,11 +5590,15 @@ def _collect_episodes_files(series_name: str,
                         continue
 
                     s, eps = _parse_all_episodes(name)
+                    complete_only = False
                     if s is None or not eps:
                         s_one, e_one = _parse_ep_any(name)
                         if s_one is None or e_one is None:
-                            # Curated: zkus párování podle názvu dílu ve filename
-                            if fairy and fairy.get("curated"):
+                            s_pack = _season_complete_number(name)
+                            if s_pack is not None:
+                                complete_only = True
+                                s, eps = int(s_pack), []
+                            elif fairy and fairy.get("curated"):
                                 try:
                                     from . import czech_series_episodes as cse
                                     hit = cse.match_filename_to_episode(
@@ -5464,25 +5611,20 @@ def _collect_episodes_files(series_name: str,
                                     continue
                             else:
                                 continue
-                        s, eps = int(s_one), [int(e_one)]
+                        if not complete_only:
+                            s, eps = int(s_one), [int(e_one)]
 
-                    if max_ep_cap and int(s) == 1:
+                    if max_ep_cap and int(s) == 1 and eps:
                         eps = [e for e in eps if int(e) <= int(max_ep_cap)]
-                        if not eps:
+                        if not eps and not complete_only:
                             continue
 
                     ident = f.get("ident") or ""
-                    if _parse_se(name)[0] is not None:
-                        detected = _series_name(name)
-                    else:
-                        detected = _ct.clean_title(
-                            re.split(
-                                r"epizod[a]?|d[ií]l|diel|č[aá]st|cast",
-                                name,
-                                maxsplit=1,
-                                flags=re.I,
-                            )[0],
-                        ) or _series_name(name)
+                    detected = _normalize_detected_series_title(
+                        _detect_series_from_episode_filename(name)
+                        if not complete_only
+                        else (_series_name(name) or "")
+                    )
 
                     if strict:
                         ok = _title_ok(detected)
@@ -5497,6 +5639,15 @@ def _collect_episodes_files(series_name: str,
                         if not ok:
                             continue
                     elif not _title_ok(detected):
+                        continue
+
+                    if complete_only:
+                        # Season COMPLETE — expand až po TMDB (známe počet dílů)
+                        f_ep = dict(f)
+                        f_ep["_ep_season_complete"] = int(s)
+                        all_files.append(f_ep)
+                        added += 1
+                        new_in_this_query += 1
                         continue
 
                     for e in eps:
@@ -5700,6 +5851,28 @@ def _fill_missing_episodes(
         for f in batch:
             name = f.get("name") or ""
             ident = f.get("ident") or ""
+            detected = _detect_series_from_episode_filename(name)
+            if not _title_ok(detected):
+                # COMPLETE: detected může být "Reacher S03" → normalize uvnitř detect
+                if not _title_ok(_normalize_detected_series_title(
+                        _series_name(name) or "")):
+                    continue
+            s_pack = _season_complete_number(name)
+            if s_pack is not None:
+                if want_s is not None and int(s_pack) != int(want_s):
+                    continue
+                # U ep-cíleného fill nech pack projít (expand doplní díry)
+                f_ep = dict(f)
+                f_ep["_ep_season_complete"] = int(s_pack)
+                pack_key = (ident, int(s_pack), 0)
+                if ident and pack_key in seen_ep_keys:
+                    continue
+                out.append(f_ep)
+                if ident:
+                    seen_ep_keys.add(pack_key)
+                added += 1
+                got += 1
+                continue
             s, eps = _parse_all_episodes(name)
             if s is None or not eps:
                 s_one = e_one = None
@@ -5716,9 +5889,6 @@ def _fill_missing_episodes(
                 eps = [e for e in eps if int(e) == int(want_e)]
                 if not eps:
                     continue
-            detected = _detect_series_from_episode_filename(name)
-            if not _title_ok(detected):
-                continue
             for e in eps:
                 ep_key = (ident, int(s), int(e))
                 if ident and ep_key in seen_ep_keys:
@@ -6066,7 +6236,7 @@ def get_series_seasons(series_name: str,
     ]
     alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v7:{_norm_compare(series_name)}"
+        f"series_seasons:v8:{_norm_compare(series_name)}"
         f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -6081,6 +6251,8 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v3:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v16:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
                 f"episodes_files:v15:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -6202,10 +6374,16 @@ def get_series_seasons(series_name: str,
                 files = _fill_missing_episodes(
                     files, series_name, tmdb_seasons, alt_names=alt_clean,
                 )
+                files = _expand_season_complete_packs(
+                    files, series_name, tmdb_seasons, match_names=[
+                        series_name, *alt_clean,
+                        *_series_short_aliases(series_name),
+                    ],
+                )
                 if len(files) > before:
                     try:
                         ep_cache = (
-                            f"episodes_files:v15:{_norm_compare(series_name)}"
+                            f"episodes_files:v16:{_norm_compare(series_name)}"
                             f":{'s' if (fairy and fairy.get('strict')) else 'n'}"
                             f":{classic_year or 0}:{alt_key}"
                         )
