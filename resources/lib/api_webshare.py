@@ -1846,20 +1846,29 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
                 and dt.issubset(set(req_sig))
             ):
                 return True
-            # Opačně: requested 'Reacher', detected 'Jack Reacher'
-            det_sig = [
-                t for t in _title_meaningful_token_list(
-                    _ct.ascii_fold(detected) or detected
-                )
-                if t not in _FRANCHISE_NOISE_TOKENS
-            ]
-            if (
-                len(req_sig) == 1
-                and len(req_sig[0]) >= 5
-                and len(det_sig) >= 2
-                and det_sig[-1] == req_sig[0]
-            ):
-                return True
+
+        # Opačně: requested 'Reacher', detected 'Jack Reacher'
+        # (nesmí být uvnitř dt⊆rt — u Reacher⊂Jack Reacher to neplatí)
+        req_sig = [
+            t for t in _title_meaningful_token_list(
+                _ct.ascii_fold(requested) or requested
+            )
+            if t not in _FRANCHISE_NOISE_TOKENS
+        ]
+        det_sig = [
+            t for t in _title_meaningful_token_list(
+                _ct.ascii_fold(detected) or detected
+            )
+            if t not in _FRANCHISE_NOISE_TOKENS
+        ]
+        if (
+            len(req_sig) == 1
+            and len(req_sig[0]) >= 5
+            and len(det_sig) >= 2
+            and det_sig[-1] == req_sig[0]
+            and set(req_sig).issubset(set(det_sig))
+        ):
+            return True
     # Spin-off / podtitul: "The Walking Dead: Dead City" ↔ WS "Dead City"
     # Celý podtitul (min. 2 tokeny) — samotné "city" nesmí chytit Big City Greens.
     sub = _series_subtitle(requested)
