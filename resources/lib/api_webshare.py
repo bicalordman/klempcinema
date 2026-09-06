@@ -6037,6 +6037,47 @@ def _recount_ws_seasons(
     return ws_season_counts, ws_episodes_per_season
 
 
+def _cap_ws_episodes_to_tmdb(
+    ws_episodes_per_season: Dict[int, set],
+    tmdb_seasons: Optional[List[Dict[str, Any]]],
+) -> Tuple[Dict[int, int], Dict[int, set]]:
+    """
+    Ořízne díly nad TMDB episode_count.
+
+    WS často má falešné S01E10+ (starý Netflix Daredevil / špatné číslo) —
+    UI pak ukáže 13/9 a nehratelné „díly“ bez metadat.
+    """
+    caps: Dict[int, int] = {}
+    for tm in (tmdb_seasons or []):
+        try:
+            s_num = int(tm.get("season_number") or 0)
+            expected = int(tm.get("episode_count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if s_num > 0 and expected > 0:
+            caps[s_num] = expected
+    if not caps:
+        counts = {s: len(eps) for s, eps in ws_episodes_per_season.items()}
+        return counts, ws_episodes_per_season
+
+    capped: Dict[int, set] = {}
+    dropped = 0
+    for s, eps in ws_episodes_per_season.items():
+        if s in caps:
+            keep = {int(e) for e in eps if 1 <= int(e) <= caps[s]}
+            dropped += len(eps) - len(keep)
+            capped[s] = keep
+        else:
+            capped[s] = set(eps)
+    if dropped:
+        log.info(
+            "_cap_ws_episodes_to_tmdb: odhozeno %d epizod nad TMDB limit",
+            dropped,
+        )
+    counts = {s: len(eps) for s, eps in capped.items()}
+    return counts, capped
+
+
 def _kids_title_in_name(title: str, filename: str) -> bool:
     """ASCII substring / token shoda názvu seriálu ve filename."""
     if not title or not filename:
@@ -6269,7 +6310,7 @@ def get_series_seasons(series_name: str,
     ]
     alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v10:{_norm_compare(series_name)}"
+        f"series_seasons:v11:{_norm_compare(series_name)}"
         f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -6284,6 +6325,8 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v3:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"series_eps:v5:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"episodes_files:v18:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -6442,6 +6485,9 @@ def get_series_seasons(series_name: str,
                 ws_season_counts, ws_episodes_per_season = _recount_ws_seasons(
                     files, series_name, curated_map,
                 )
+                ws_season_counts, ws_episodes_per_season = _cap_ws_episodes_to_tmdb(
+                    ws_episodes_per_season, tmdb_seasons,
+                )
         elif tmdb_id:
             pass
     except Exception as exc:  # noqa: BLE001
@@ -6449,6 +6495,12 @@ def get_series_seasons(series_name: str,
         continuous = (
             curated_map is None
             and _is_continuous_dily_show(files, series_name)
+        )
+
+    # Po TMDB (i bez fill): ořízni falešné E10+ podle šablony sezón
+    if tmdb_seasons and curated_map is None and not continuous:
+        ws_season_counts, ws_episodes_per_season = _cap_ws_episodes_to_tmdb(
+            ws_episodes_per_season, tmdb_seasons,
         )
 
     # 3a) Continuous díly (Ordinace…) — chunky po 50, bez fake TMDB sezón
@@ -6576,7 +6628,7 @@ def get_series_episodes(series_name: str,
 
     # CACHE 30 min - klik na sezónu pak nečeká na enrich epizod znovu
     ep_cache_key = (
-        f"series_eps:v4:{_norm_compare(series_name)}:s{season}"
+        f"series_eps:v5:{_norm_compare(series_name)}:s{season}"
         f":y{classic_year or 0}:f{ep_from or 0}:t{ep_to or 0}"
         f":a{'|'.join(sorted({_norm_compare(a) for a in alt_clean}))}"
     )
@@ -6657,9 +6709,12 @@ def get_series_episodes(series_name: str,
 
     # TMDB lookup — s preferencí roku z curated seznamu
     tmdb_id = None
+    tmdb_ep_cap: Optional[int] = None
     try:
         from . import tmdb_tv_api
         candidates = tmdb_tv_api.tmdb_lookup_tv(series_name) or []
+        if not candidates and alt_clean:
+            candidates = tmdb_tv_api.tmdb_lookup_tv(alt_clean[0]) or []
         meta = None
         if classic_year and candidates:
             for c in candidates:
@@ -6676,8 +6731,32 @@ def get_series_episodes(series_name: str,
             meta = candidates[0]
         if meta:
             tmdb_id = meta.get("tmdb_id")
+            if tmdb_id and season is not None and curated_map is None:
+                for tm in (tmdb_tv_api.get_seasons(tmdb_id) or []):
+                    try:
+                        if int(tm.get("season_number") or 0) == int(season):
+                            cap = int(tm.get("episode_count") or 0)
+                            if cap > 0:
+                                tmdb_ep_cap = cap
+                            break
+                    except (TypeError, ValueError):
+                        continue
     except Exception as exc:  # noqa: BLE001
         log.debug("get_series_episodes: TMDB lookup selhal: %s", exc)
+
+    if tmdb_ep_cap is not None:
+        before_n = len(by_ep)
+        kept: Dict[str, List[Dict[str, Any]]] = {}
+        for k, v in by_ep.items():
+            m_cap = re.match(r"S\d{1,2}E(\d{1,4})$", k, re.I)
+            if m_cap and int(m_cap.group(1)) <= int(tmdb_ep_cap):
+                kept[k] = v
+        by_ep = kept
+        if len(by_ep) < before_n:
+            log.info(
+                "get_series_episodes(%r, s=%s): odhozeno %d ep nad TMDB cap=%s",
+                series_name, season, before_n - len(by_ep), tmdb_ep_cap,
+            )
 
     items: List[Dict[str, Any]] = []
     for ep_key in sorted(by_ep.keys()):

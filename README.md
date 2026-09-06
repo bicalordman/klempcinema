@@ -2,7 +2,7 @@
 
 Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
 
-**Aktuální verze: 0.0.181**
+**Aktuální verze: 0.0.182**
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.181.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.182.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -197,6 +197,11 @@ Autor: **Bicalorman**
 | Výkon / Quit | Rychlejší vypínání Kodi (neblokující thread pooly, kratší HTTP timeouty, oprava image workerů) |
 
 ---
+
+### v0.0.182 — Falešné díly nad TMDB limitem
+
+- Daredevil S01 má 9 dílů — WS ``S01E10+`` se už nezobrazí (nešly přehrát / bez metadat)
+- Sezónní počítadlo už neukáže ``13/9``
 
 ### v0.0.181 — Obecné hledání seriálů (WS realita)
 

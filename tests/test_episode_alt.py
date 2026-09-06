@@ -160,6 +160,19 @@ class TestEpisodeAltParse(unittest.TestCase):
         })
         self.assertEqual(eps, list(range(1, 9)))
 
+    def test_cap_ws_episodes_to_tmdb(self):
+        ws = {1: {1, 2, 3, 9, 10, 11, 12, 13}, 2: {1, 2, 8}}
+        tmdb = [
+            {"season_number": 1, "episode_count": 9},
+            {"season_number": 2, "episode_count": 8},
+        ]
+        counts, capped = aws._cap_ws_episodes_to_tmdb(ws, tmdb)
+        self.assertEqual(counts[1], 4)  # 1,2,3,9
+        self.assertEqual(capped[1], {1, 2, 3, 9})
+        self.assertNotIn(10, capped[1])
+        self.assertEqual(counts[2], 3)
+        self.assertEqual(capped[2], {1, 2, 8})
+
     def test_dead_city_quality_picker_rejects_main_twd(self):
         base = "The Walking Dead: Dead City S03E01"
         variants = [
