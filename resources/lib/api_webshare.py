@@ -5422,7 +5422,7 @@ def _collect_episodes_files(series_name: str,
         sorted({_norm_compare(a) for a in (alt_names or []) if (a or "").strip()})
     )
     cache_key = (
-        f"episodes_files:v17:{_norm_compare(series_name)}"
+        f"episodes_files:v18:{_norm_compare(series_name)}"
         f":{'s' if strict else 'n'}:{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -5582,6 +5582,7 @@ def _collect_episodes_files(series_name: str,
                 if not files:
                     break
                 added = 0
+                title_hits = 0
                 for f in files:
                     name = f.get("name") or ""
                     if strict and _FAIRY_EP_POLLUTION_RE.search(name):
@@ -5641,6 +5642,7 @@ def _collect_episodes_files(series_name: str,
                     elif not _title_ok(detected):
                         continue
 
+                    title_hits += 1
                     if complete_only:
                         # Season COMPLETE — expand až po TMDB (známe počet dílů)
                         f_ep = dict(f)
@@ -5663,6 +5665,9 @@ def _collect_episodes_files(series_name: str,
                             seen_ep_keys.add(ep_key)
                         added += 1
                         new_in_this_query += 1
+                # WS fulltext: 'Reacher S01' → Preacher spam. Další stránky = ztráta času.
+                if title_hits == 0 and p == 1:
+                    break
                 if added == 0 and p > 1:
                     break
         log.info("_collect_episodes_files: query[%d]=%r -> %d novych souboru",
@@ -5841,6 +5846,11 @@ def _fill_missing_episodes(
         match_names,
         key=lambda n: (len(n.split()), len(n)),
     )[:2]
+    # Přesnější název první (Jack Reacher) — WS soubory jsou často plným jménem
+    precise_names = sorted(
+        match_names,
+        key=lambda n: (-len(n.split()), -len(n)),
+    )[:2]
 
     out = list(files)
     added = 0
@@ -5907,35 +5917,47 @@ def _fill_missing_episodes(
     for s_num in incomplete_seasons:
         if _shutdown.is_shutting_down():
             break
-        for mn in search_names:
+        empty = not found.get(s_num)
+        pages = (1, 2, 3) if (aggressive or empty) else (1, 2)
+        for mn in precise_names:
             if _shutdown.is_shutting_down():
                 break
-            q = f"{mn} S{s_num:02d}"
-            for page in (1, 2):
-                if _shutdown.is_shutting_down():
+            season_dead = False
+            for q in (f"{mn} S{s_num:02d}", f"{mn} S{s_num}"):
+                if season_dead:
                     break
-                batch = search_videos(query=q, sort="rating", page=page) or []
-                if not batch:
-                    break
-                _ingest(batch, want_s=s_num)
-            if aggressive:
-                batch = search_videos(
-                    query=f"{mn}.S{s_num:02d}", sort="recent", page=1,
-                ) or []
-                _ingest(batch, want_s=s_num)
+                for page in pages:
+                    if _shutdown.is_shutting_down():
+                        break
+                    batch = search_videos(query=q, sort="rating", page=page) or []
+                    if not batch:
+                        break
+                    got = _ingest(batch, want_s=s_num)
+                    # WS fuzzy: 'X S03' často vrátí jen jiné sezóny / cizí seriál
+                    if page == 1 and got == 0:
+                        season_dead = True
+                        break
+                if aggressive or empty:
+                    if not season_dead:
+                        batch = search_videos(
+                            query=q, sort="recent", page=1,
+                        ) or []
+                        _ingest(batch, want_s=s_num)
 
     short_names = [n for n in search_names if len(n.split()) == 1 and len(n) >= 5]
-    pages = 4 if aggressive else 2
+    pages_n = 4 if aggressive else 2
     for mn in short_names[:1]:
         if _shutdown.is_shutting_down():
             break
-        for page in range(1, pages + 1):
+        for page in range(1, pages_n + 1):
             if _shutdown.is_shutting_down():
                 break
             batch = search_videos(query=mn, sort="rating", page=page) or []
             if not batch:
                 break
-            _ingest(batch)
+            got = _ingest(batch)
+            if page == 1 and got == 0:
+                break
         if aggressive:
             batch = search_videos(query=mn, sort="recent", page=1) or []
             _ingest(batch)
@@ -5945,21 +5967,43 @@ def _fill_missing_episodes(
         if e_num not in found.get(s_num, set()):
             still_missing.append((s_num, e_num))
 
-    if aggressive and still_missing:
-        still_missing = still_missing[:12]
-        primary = search_names[0]
-        for s_num, e_num in still_missing:
-            if _shutdown.is_shutting_down():
-                break
+    empty_eps = [se for se in still_missing if not found.get(se[0])]
+    if aggressive:
+        still_missing.sort(
+            key=lambda se: (0 if not found.get(se[0]) else 1, se[0], se[1])
+        )
+        todo = still_missing[:16]
+    else:
+        todo = empty_eps[:8]
+
+    skip_seasons: set = set()
+    if todo:
+        for s_num, e_num in todo:
+            if _shutdown.is_shutting_down() or s_num in skip_seasons:
+                continue
             se = f"S{s_num:02d}E{e_num:02d}"
-            batch = search_videos(
-                query=f"{primary} {se}", sort="rating", page=1,
-            ) or []
-            if not _ingest(batch, want_s=s_num, want_e=e_num):
-                batch = search_videos(
-                    query=f"{primary}.{se}", sort="rating", page=1,
-                ) or []
-                _ingest(batch, want_s=s_num, want_e=e_num)
+            hit = False
+            saw_series = False
+            for mn in precise_names:
+                if hit or _shutdown.is_shutting_down():
+                    break
+                for q in (f"{mn} {se}", f"{mn}.{se}"):
+                    batch = search_videos(query=q, sort="rating", page=1) or []
+                    # Má WS vůbec tento seriál v odpovědi?
+                    for f in batch:
+                        det = _detect_series_from_episode_filename(
+                            f.get("name") or "")
+                        if _title_ok(det):
+                            saw_series = True
+                            break
+                    if _ingest(batch, want_s=s_num, want_e=e_num):
+                        hit = True
+                        break
+            # Sezóna na WS není (jen S04 spam) — nezkoušej E02…E08
+            if not hit and saw_series and not found.get(s_num):
+                skip_seasons.add(s_num)
+            elif not hit and not saw_series and not found.get(s_num):
+                skip_seasons.add(s_num)
 
     if added:
         classify_files(out)
@@ -6225,7 +6269,7 @@ def get_series_seasons(series_name: str,
     ]
     alt_key = "|".join(sorted({_norm_compare(a) for a in alt_clean}))
     seasons_cache_key = (
-        f"series_seasons:v9:{_norm_compare(series_name)}"
+        f"series_seasons:v10:{_norm_compare(series_name)}"
         f":y{classic_year or 0}:{alt_key}"
     )
     if force_refresh:
@@ -6240,6 +6284,8 @@ def get_series_seasons(series_name: str,
                 f"series_eps:v3:{_norm_compare(series_name)}:")
             cache.cache_clear_prefix(
                 f"series_eps:v4:{_norm_compare(series_name)}:")
+            cache.cache_clear_prefix(
+                f"episodes_files:v18:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
                 f"episodes_files:v17:{_norm_compare(series_name)}")
             cache.cache_clear_prefix(
@@ -6371,12 +6417,12 @@ def get_series_seasons(series_name: str,
             tmdb_seasons = tmdb_tv_api.get_seasons(tmdb_id)
             if tmdb_seasons:
                 before = len(files)
-                # Těžký fill jen při Aktualizovat — jinak timeout → 0/8
-                if force_refresh:
-                    files = _fill_missing_episodes(
-                        files, series_name, tmdb_seasons,
-                        alt_names=alt_clean, aggressive=True,
-                    )
+                # Lehký fill vždy (jinak 1. otevření = 0/8 u S1–S3).
+                # Aggressive (Aktualizovat) = víc stránek + per-ep.
+                files = _fill_missing_episodes(
+                    files, series_name, tmdb_seasons,
+                    alt_names=alt_clean, aggressive=bool(force_refresh),
+                )
                 files = _expand_season_complete_packs(
                     files, series_name, tmdb_seasons, match_names=[
                         series_name, *alt_clean,
@@ -6386,7 +6432,7 @@ def get_series_seasons(series_name: str,
                 if len(files) > before:
                     try:
                         ep_cache = (
-                            f"episodes_files:v17:{_norm_compare(series_name)}"
+                            f"episodes_files:v18:{_norm_compare(series_name)}"
                             f":{'s' if (fairy and fairy.get('strict')) else 'n'}"
                             f":{classic_year or 0}:{alt_key}"
                         )
