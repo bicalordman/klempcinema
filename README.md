@@ -1,14 +1,14 @@
 # KlempCinema
 
-Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Webshare.
+Kodi doplněk pro prohlížení a přehrávání **vlastní knihovny souborů** dostupných přes účet uživatele na [Webshare](https://webshare.cz). Metadata (plakáty, názvy sezón) bere z TMDB.
 
-**Aktuální verze: 0.0.182**
+**Aktuální verze: 0.0.183**
 
 ---
 
 ## Instalace
 
-**Potřebuješ:** Kodi 19+, účet [Webshare](https://webshare.cz), TMDB klíč ([zdarma](https://www.themoviedb.org/settings/api)) pro plakáty.
+**Potřebuješ:** Kodi 19+, účet [Webshare](https://webshare.cz) (soubory, ke kterým máš v účtu přístup), TMDB klíč ([zdarma](https://www.themoviedb.org/settings/api)) pro plakáty.
 
 ---
 
@@ -27,7 +27,7 @@ Kodi video doplněk pro procházení a přehrávání filmů a seriálů z Websh
 
 ### B) Ze ZIPu — ručně
 
-1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.182.zip`
+1. Stáhni z [Releases](https://github.com/bicalordman/klempcinema/releases) soubor `plugin.video.klempcinema-0.0.183.zip`
 2. **Doplňky → Nainstalovat ze ZIP** → vyber stažený soubor
 
 Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainstaluj nový ZIP.
@@ -55,6 +55,7 @@ Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainst
 | Problém | Řešení |
 |---------|--------|
 | „Nepodařilo se nainstalovat doplněk ze ZIP" | Odinstaluj starou verzi, restartuj Kodi, nainstaluj znovu. Stáhni ZIP znovu z GitHub Releases. |
+| Prázdné / neúplné sezóny | Doplněk ukáže jen soubory, které ve výsledcích hledání **rozpozná** (název + sezóna/díl). Chybějící položky obvykle v účtu nejsou, nebo mají nestandardní název. |
 | Prázdné seznamy filmů | Zkontroluj Webshare přihlášení v Nastavení doplňku. |
 | Filmy bez plakátů | Zadej TMDB API klíč v Nastavení. |
 | Pomalé načítání | Normální při prvním otevření rubriky (~10 s). Druhé otevření je okamžité (cache). |
@@ -64,7 +65,7 @@ Při upgradu ze staré verze: odinstaluj starý doplněk, restartuj Kodi, nainst
 
 ## Funkce
 
-- Procházení filmů a seriálů (Webshare + TMDB metadata, žánry v popisku)
+- Procházení knihovny (Webshare účet uživatele + TMDB metadata, žánry v popisku)
 - Trending, žánry, streamovací platformy (Netflix/HBO/Disney+…, flatrate CZ/SK + žánry uvnitř)
 - Pictogramové ikony v menu (Seznam; volbu zobrazení Kodi pamatuje)
 - Seriály s rozdělením na sezóny a díly
@@ -136,9 +137,17 @@ To znamená:
 
 ### Co dar NENÍ
 
-- **Nejde o platbu za obsah.** Obsah poskytuje třetí strana (Webshare.cz). Uživatel si sjednává vlastní VIP předplatné u Webshare nezávisle na doplňku.
+- **Nejde o platbu za obsah.** Doplněk jen propojuje Kodi s **tvým** Webshare účtem. Předplatné a dostupnost souborů řešíš přímo s Webshare.
 - **Nejde o úplatu za službu.** Doplněk je veřejně dostupný a funkční bez jakéhokoli daru.
 - **Nejde o předplatné.** Žádné automatické platby, žádné měsíční fakturace.
+
+### Odpovědnost za obsah
+
+KlempCinema **nehostuje** mediální soubory. Vyhledává a přehrává jen to, co je dostupné přes API k **přihlášenému účtu** uživatele. Metadata (TMDB) slouží k organizaci knihovny.
+
+- Používej jen obsah, ke kterému máš oprávněný přístup.
+- Neúplný počet sezón/dílů znamená, že ve výsledcích hledání **nebyly nalezeny** soubory s rozpoznatelným názvem.
+- Nestandardní pojmenování souborů může zabránit přiřazení k sezóně/dílu.
 
 ### Údaje pro ruční platbu
 
@@ -198,34 +207,38 @@ Autor: **Bicalorman**
 
 ---
 
+### v0.0.183 — Upřesnění chování knihovny
+
+- Veřejný popis: vlastní Webshare účet, neúplné sezóny = nerozpoznané / nenalezené soubory
+- Stejný kód jako 0.0.182 (limit dílů podle TMDB šablony)
+
 ### v0.0.182 — Falešné díly nad TMDB limitem
 
-- Daredevil S01 má 9 dílů — WS ``S01E10+`` se už nezobrazí (nešly přehrát / bez metadat)
-- Sezónní počítadlo už neukáže ``13/9``
+- Díly s číslem vyšším než oficiální počet v TMDB se v sezóně nezobrazí
+- Sezónní počítadlo odpovídá šabloně metadat
 
-### v0.0.181 — Obecné hledání seriálů (WS realita)
+### v0.0.181 — Stabilnější hledání sezón
 
-- Lehký fill i při prvním otevření
-- Early-abort když WS vrátí cizí spam (``Reacher S01`` → Preacher)
-- Prázdná sezóna po 1. stránce = neplýtvat dalšími desítkami HTTP
-- Ověřeno na WS: Reacher teď hlavně S04; Breaking Bad / Dead City sezónní query OK
+- Lehký doplňovací průchod i při prvním otevření
+- Early-abort při cizích / nerelevantních výsledcích hledání
+- Prázdná sezóna po 1. stránce = méně zbytečných HTTP dotazů
 
 ### v0.0.180 — Rychlejší Aktualizovat
 
-- Méně WS HTTP (dřív stovky dotazů → timeout a ``0/8``)
-- Těžké doplňování dílů jen při Aktualizovat
-- Bez zbytečného 2. collectu, když stačí alias ``Reacher``
+- Méně HTTP při aktualizaci knihovny (dřív mohlo timeoutovat)
+- Těžší doplňování jen při Aktualizovat
+- Bez zbytečného druhého collectu, když stačí krátký alias názvu
 
 ### v0.0.179 — Season COMPLETE packy
 
-- ``Reacher.S03.COMPLETE`` / ``Season 3 Komplet`` se už nezahazují
-- Chybějící díly sezóny se započítají z COMPLETE packu
+- COMPLETE / komplet pack sezóny se nezahazuje
+- Chybějící sloty sezóny lze doplnit z packu
 
-### v0.0.178 — Dual-pack epizody + Reacher search
+### v0.0.178 — Dual-pack epizody + krátké aliasy
 
-- ``Reacher.S03E01E02`` už nepadá na title match (fix ``clean_series_name``)
+- Dual-pack ``SxxEyyEzz`` už nepadá na title match
 - Multipack / rozsah ``E05-E08`` se započítá do všech dílů
-- Hledání preferuje alias ``Reacher`` místo spamového ``Jack``
+- Hledání preferuje krátký alias názvu, kde dává smysl
 
 ### v0.0.177 — Oprava aliasu Reacher ↔ Jack Reacher
 

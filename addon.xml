@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon id="plugin.video.klempcinema"
        name="KlempCinema"
-       version="0.0.182"
+       version="0.0.183"
        provider-name="Bicalorman">
 
     <requires>
@@ -14,17 +14,19 @@
     </extension>
 
     <extension point="xbmc.addon.metadata">
-        <summary lang="cs_CZ">Filmy a serialy - vlastni knihovna pro Kodi</summary>
-        <description lang="cs_CZ">KlempCinema je video plugin pro Kodi, ktery umoznuje prochazet rubriky Filmy a Serialy, vyhledavat tituly a prehravat je prostrednictvim Webshare uctu. Pred prvnim pouzitim vyplnte prihlasovaci udaje k Webshare v nastaveni doplnku.</description>
-        <summary lang="en_GB">Movies and TV shows - custom Kodi library</summary>
-        <description lang="en_GB">KlempCinema is a Kodi video plugin that allows browsing Movies and TV shows sections, searching for titles and playing them via a Webshare account. Fill in your Webshare credentials in the addon settings before first use.</description>
+        <summary lang="cs_CZ">Vlastni knihovna (Webshare ucet) pro Kodi</summary>
+        <description lang="cs_CZ">KlempCinema propojuje Kodi s vasim uctem na Webshare a umoznuje prochazet dostupne soubory s metadaty z TMDB. Pouzivejte pouze obsah, ke kteremu mate opravneny pristup. Pred prvnim pouzitim vyplnte prihlasovaci udaje k Webshare v nastaveni doplnku.</description>
+        <summary lang="en_GB">Personal library (Webshare account) for Kodi</summary>
+        <description lang="en_GB">KlempCinema connects Kodi to your Webshare account so you can browse files available to that account, with TMDB metadata. Only use content you are authorized to access. Enter your Webshare credentials in the addon settings before first use.</description>
+        <disclaimer lang="cs_CZ">Doplnek nehostuje soubory. Neuplne vysledky znamena, ze v uctu nebyly nalezeny rozpoznatelne soubory.</disclaimer>
+        <disclaimer lang="en_GB">This addon does not host files. Incomplete results mean no matching files were found for your account.</disclaimer>
         <platform>all</platform>
         <language>cs</language>
         <license>GPL-3.0-or-later</license>
         <source>https://github.com/bicalordman/klempcinema</source>
         <forum>https://github.com/bicalordman/klempcinema/issues</forum>
         <website>https://github.com/bicalordman/klempcinema</website>
-        <news>v0.0.182 Odrez falesne dilu nad TMDB (Daredevil S01E10+).</news>
+        <news>v0.0.183 Vlastni WS ucet; neuplne sezony = nenalezeno / nerozpoznany nazev.</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

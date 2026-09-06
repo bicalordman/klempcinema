@@ -14,6 +14,11 @@ __pycache__/
 fanart_old.jpg
 icon_old.png
 
+# Lokální diagnostika / AI Monster (ne do gitu)
+diagnose_output.txt
+.aimonster/
+.venv/
+
 # IDE / editor
 .cursor/
 .vscode/
