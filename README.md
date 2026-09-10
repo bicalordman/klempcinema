@@ -2,7 +2,7 @@
 
 Kodi doplněk (plugin), který propojuje Kodi s **vlastním Webshare účtem** uživatele a zobrazuje metadata z TMDB.
 
-**Verze: 0.0.184 (poslední)**
+**Verze: 0.0.185 (poslední)**
 
 ## Oznámení
 
@@ -18,7 +18,7 @@ Instalace, kterou už máš, může dál fungovat. Doplněk je nástroj k práci
 
 ## Instalace
 
-### Z repozitáře (aktualizace na 0.0.184)
+### Z repozitáře (aktualizace na 0.0.185)
 
 1. **Nastavení → Průzkumník souborů → Přidat zdroj** →  
    `https://bicalordman.github.io/klempcinema/repo/`
@@ -27,7 +27,7 @@ Instalace, kterou už máš, může dál fungovat. Doplněk je nástroj k práci
 
 ### Ze ZIPu
 
-Stáhni `plugin.video.klempcinema-0.0.184.zip` z [jediného release](https://github.com/bicalordman/klempcinema/releases/tag/v0.0.184) a nainstaluj přes **Doplňky → Nainstalovat ze ZIP**.
+Stáhni `plugin.video.klempcinema-0.0.185.zip` z [jediného release](https://github.com/bicalordman/klempcinema/releases/tag/v0.0.185) a nainstaluj přes **Doplňky → Nainstalovat ze ZIP**.
 
 ## Nastavení
 

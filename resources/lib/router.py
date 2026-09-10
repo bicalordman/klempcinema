@@ -191,7 +191,7 @@ def route(params: Dict[str, str]) -> None:
     log.debug("router.route(action=%s, params=%s)", action, params)
 
     try:
-        m, ws, p, d, h, t, tv, vy, co = _v()
+        m, ws, p, d, h, t, tv, co = _v()
 
         if action == "play":
             p.view_play(handle, params)
