@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Testy alt parsování epizod bez SxxEyy (Voyo / reality)."""
+"""Testy alt parsování epizod bez SxxEyy (reality / SK názvy)."""
 
 from __future__ import annotations
 

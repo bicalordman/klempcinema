@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import os
 
 import xbmc  # type: ignore
 import xbmcgui  # type: ignore
@@ -77,9 +76,9 @@ def view_root(handle: int, base_url: str) -> None:
             fanart=fanart,
         )
 
-    donate_label = (
+    notice_label = (
         "[B][COLOR FFFFD700]"
-        "\u2665 Poslat autorovi dar (dobrovolne) \u2665"
+        "Ozn\u00e1men\u00ed!!!"
         "[/COLOR][/B]"
     )
     donate_icon = _addon_icon_for("donate.png")
@@ -89,12 +88,11 @@ def view_root(handle: int, base_url: str) -> None:
 
     # v0.0.149: pictogramy + CMenu (508) jako Sosáč — bez textovych znacek
     menu = [
-        (30220, "donate",          {}, donate_icon, donate_label),
+        (30220, "donate",          {}, donate_icon, notice_label),
         (30004, "search",          {}, _mi("search")),
         (30002, "menu_movies",     {}, _mi("movies")),
         (30003, "menu_series",     {}, _mi("series")),
         (30150, "menu_platforms",  {}, _mi("platforms")),
-        (30160, "menu_voyo",       {}, _mi("voyo")),
         (30110, "menu_discover",   {}, _mi("discover")),
         (30140, "list_tv_program", {}, _mi("tv")),
         (30300, "menu_concerts",   {}, _mi("concerts")),
@@ -213,96 +211,33 @@ def view_refresh_icons(handle: int, base_url: str, params: dict) -> None:
 
 
 def view_donate(handle: int, base_url: str, params: dict) -> None:
-    """
-    Zobrazi dialog s DAREM (CZ QR SPD format) a vysvetlujicim textem.
-
-    Pravni ramec (proc je to bezpecne pro autora i uzivatele):
-    - Platba je oznacena jako "Dar" - bezuplatne nabyti dle obc. zakoniku
-    - Dar od fyzicke osoby fyzicke osobe do 50 000 Kc/rok od jednoho darce
-      je osvobozen od dane z prijmu (§10 odst. 3 pism. c) zakona c.
-      586/1992 Sb. o danich z prijmu).
-    - Uzivatel nezskava zadnou protihodnotu (obsah, sluzbu, prioritu).
-      Plugin funguje stejne pro vsechny.
-    - Obsah neposkytuje autor pluginu - obsah poskytuje tret strana
-      (Webshare.cz), ke ktere si uzivatel sjednava vlastni predplatne.
-    """
-    addon = _addon()
-    addon_path = addon.getAddonInfo("path")
-    qr_path = os.path.join(addon_path, "resources", "media", "donate_qr.png")
-
-    iban_pretty = "CZ69 6210 6701 0022 3206 4328"
-    iban_raw = "CZ6962106701002232064328"
-    account_cz = "670100-2232064328/6210"
-
-    # v0.0.80: lokalizovany text - drive hardcoded v cestine, ted bere
-    # preklady ze strings.po (cz pro CZ Kodi, EN pro anglicky Kodi atd.)
-    info_lines = [
-        _tr_safe(30240, "GIFT FOR THE AUTHOR"),
+    """Oznámení o ukončení vývoje (poslední verze). Bez daru / QR."""
+    info_text = "\n".join([
+        "OZNÁMENÍ — POSLEDNÍ VERZE",
         "",
-        f"{_tr_safe(30241, 'IBAN')}:    {iban_pretty}",
-        f"IBAN:    {iban_raw}",
-        f"Ucet CZ: {account_cz}",
-        "Banka:   mBank (6210)",
-        f"{_tr_safe(30242, 'Currency')}:    CZK",
-        f"{_tr_safe(30243, 'Message')}:    {_tr_safe(30244, 'Gift KlempCinema')}",
+        "Rozhodl jsem se ukončit vývoj, podporu i další",
+        "veřejné šíření doplňku KlempCinema.",
+        "Další aktualizace už nevycházejí.",
         "",
-        _tr_safe(30245, "How to send:"),
-        _tr_safe(30246, "  1) Open your banking app"),
-        _tr_safe(30247, "  2) Pay -> Scan QR code"),
-        _tr_safe(30248, "  3) Scan the QR from Kodi screen"),
-        _tr_safe(30249, "  4) Enter amount and send"),
+        "Doplněk, který už máš nainstalovaný, ti může dál",
+        "běžet jako doteď. Nemusíš nic mazat.",
         "",
-        _tr_safe(30250, "Thanks! - Bicalorman"),
-    ]
-    info_text = "\n".join(info_lines)
-
-    # v0.0.79 - DULEZITE: poradí akci je upraveno aby nedoslo k UI race
-    # ShowPicture musi byt volan AZ PO endOfDirectory, jinak Kodi
-    # otevre picture viewer s jeste otevrenym plugin handle → flicker
-    # a mouse focus uvazne (uzivatelsky report v0.0.78).
-    show_qr_requested = False
+        "KlempCinema je nástroj k práci s tvým vlastním",
+        "Webshare účtem. Používej jen soubory, ke kterým",
+        "máš oprávněný přístup — za to odpovídáš ty.",
+        "",
+        "Děkuji za dosavadní podporu.",
+        "",
+        "— Bicalorman",
+    ])
     try:
-        dlg = xbmcgui.Dialog()
-        dlg.textviewer(
-            _tr_safe(30220, "Send a gift to the author (voluntary)"),
-            info_text,
-        )
-        if os.path.exists(qr_path):
-            show_qr_requested = bool(dlg.yesno(
-                _tr_safe(30221, "Show QR code"),
-                _tr_safe(
-                    30222,
-                    "Show QR code for scanning in your banking app?"
-                ),
-                yeslabel=_tr_safe(30223, "Show QR"),
-                nolabel=_tr_safe(30224, "Close"),
-            ))
+        xbmcgui.Dialog().textviewer("Oznámení!!!", info_text)
     except Exception as exc:  # noqa: BLE001
         log.warning("view_donate dialog selhal: %s", exc)
-
-    # Nejprve zavri plugin handle, AZ POTOM otevri picture viewer.
     try:
         xbmcplugin.endOfDirectory(handle, succeeded=False, cacheToDisc=False)
     except Exception:  # noqa: BLE001
         pass
-
-    if show_qr_requested and os.path.exists(qr_path):
-        try:
-            import xbmc  # type: ignore
-            # Drobne pockame nez Kodi zpracuje endOfDirectory a UI se ustali.
-            xbmc.sleep(150)
-            # wait=True (druhy argument) - skript pocka nez se picture viewer
-            # uzavre, takze plugin proces nezustane v hybrid state.
-            xbmc.executebuiltin(f'ShowPicture({qr_path})', True)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("ShowPicture selhal: %s", exc)
-            try:
-                xbmcgui.Dialog().ok(
-                    _tr_safe(30220, "Send a gift to the author (voluntary)"),
-                    f"QR: {qr_path}",
-                )
-            except Exception:  # noqa: BLE001
-                pass
 
 
 def view_open_csfd(handle: int, base_url: str, params: dict) -> None:

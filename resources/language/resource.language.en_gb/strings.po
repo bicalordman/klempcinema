@@ -269,10 +269,6 @@ msgctxt "#30153"
 msgid "Watch region: {region} (change in Settings → TMDB)"
 msgstr "Watch region: {region} (change in Settings → TMDB)"
 
-msgctxt "#30160"
-msgid "Voyo SK shows"
-msgstr "Voyo SK shows"
-
 # --- Welcome setup (v0.0.72) ---
 
 msgctxt "#30200"

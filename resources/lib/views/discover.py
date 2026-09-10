@@ -119,7 +119,7 @@ def _add_discover_item(handle, base_url, meta: Dict[str, Any]) -> None:
 
 
 def _filter_tv_on_webshare(tv_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """v0.0.83: TV program / Voyo styl - jen polozky na Webshare."""
+    """v0.0.83: TV program styl - jen polozky na Webshare."""
     movie_entries: List[Dict[str, Any]] = []
     series_entries: List[Dict[str, Any]] = []
     for it in tv_items:

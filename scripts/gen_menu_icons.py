@@ -83,13 +83,6 @@ def platforms():
     save(img, "platforms.png")
 
 
-def voyo():
-    img, d = blank()
-    d.ellipse((44, 44, 212, 212), outline=W, width=16)
-    d.polygon([(104, 84), (104, 172), (180, 128)], fill=W)
-    save(img, "voyo.png")
-
-
 def discover():
     img, d = blank()
     d.ellipse((48, 48, 208, 208), outline=W, width=14)
@@ -241,7 +234,6 @@ def main():
     series()
     search()
     platforms()
-    voyo()
     discover()
     tv()
     concerts()

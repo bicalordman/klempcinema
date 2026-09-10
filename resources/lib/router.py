@@ -23,7 +23,7 @@ from .router_common import _addon
 
 log = logging.getLogger("klempcinema.router")
 
-# Lazy cache: (menu, webshare_lists, play, discover, history, tools, tv_program, voyo, concerts)
+# Lazy cache: (menu, webshare_lists, play, discover, history, tools, tv_program, concerts)
 _views_cache: Optional[Tuple[Any, ...]] = None
 
 
@@ -40,7 +40,6 @@ def _load_views() -> Tuple[Any, ...]:
     from .views import play
     from .views import tools
     from .views import tv_program
-    from .views import voyo
     from .views import webshare_lists
 
     _views_cache = (
@@ -51,20 +50,19 @@ def _load_views() -> Tuple[Any, ...]:
         history,
         tools,
         tv_program,
-        voyo,
         concerts,
     )
     return _views_cache
 
 
 def _v():
-    m, ws, p, d, h, t, tv, vy, co = _load_views()
-    return m, ws, p, d, h, t, tv, vy, co
+    m, ws, p, d, h, t, tv, co = _load_views()
+    return m, ws, p, d, h, t, tv, co
 
 
 def _actions() -> Dict[str, Callable]:
     """Slovník akcí – vytvořen až po načtení view modulů."""
-    m, ws, p, d, h, t, tv, vy, co = _v()
+    m, ws, p, d, h, t, tv, co = _v()
     return {
         "root":                  lambda h, b, p: m.view_root(h, b),
         "tools":                 lambda h, b, p: m.view_tools(h, b),
@@ -128,9 +126,6 @@ def _actions() -> Dict[str, Callable]:
         "platform_tv":           d.view_platform_tv,
         "platform_genres_movies": d.view_platform_genres_movies,
         "platform_genres_tv":    d.view_platform_genres_tv,
-        "menu_voyo":             vy.view_menu_voyo,
-        "voyo_section":          vy.view_voyo_section,
-        "voyo_category":         vy.view_voyo_category,
         "menu_concerts":         lambda h, b, p: co.view_menu_concerts(h, b),
         "menu_concerts_genres":  lambda h, b, p: co.view_menu_concerts_genres(h, b),
         "menu_concerts_quality": lambda h, b, p: co.view_menu_concerts_quality(h, b),

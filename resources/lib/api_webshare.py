@@ -1807,7 +1807,7 @@ def _series_title_match_for_episodes(requested: str, detected: str) -> bool:
     for rt, dt in _token_sets(requested, detected):
         if not rt or not dt:
             continue
-        # Voyo katalog (kratky nazev) + WS tag (Survivor -> Survivor Slovensko)
+        # SK aliasy (kratky nazev) + WS tag (Survivor -> Survivor Slovensko)
         if rt.issubset(dt):
             extra = dt - rt
             if not extra:
@@ -6146,7 +6146,7 @@ def _parse_all_episodes(name: str) -> Tuple[Optional[int], List[int]]:
     return int(m2.group(1)), [int(m2.group(2))]
 
 
-# v0.0.119: Voyo / reality uploady bez SxxEyy ("Ruza pre nevestu epizoda 1").
+# v0.0.119: reality uploady bez SxxEyy ("Ruza pre nevestu epizoda 1").
 # v0.0.120: SK "1. diel", "5 dil", cislo pred/po markerem.
 # v0.0.153: az 4 cifry — ceske telenovely (Ordinace dil 847).
 _ALT_EP_PATTERNS = (
@@ -7180,9 +7180,6 @@ def tmdb_series_meta_to_ws_item(meta: Dict[str, Any]) -> Optional[Dict[str, Any]
     folded = _ct.ascii_fold(title)
     if folded.lower() != title.lower():
         queries.append(folded)
-    slug = (meta.get("voyo_slug") or "").strip()
-    if slug and slug.lower() not in [q.lower() for q in queries]:
-        queries.append(slug.replace("-", " "))
 
     best_fs: Optional[List[Dict[str, Any]]] = None
     for q in queries:
@@ -7304,7 +7301,7 @@ def filter_discovery_titles_on_webshare(
     max_wait: float = TMDB_WS_FILTER_MAX_WAIT,
 ) -> List[Dict[str, Any]]:
     """
-    v0.0.83: Obecny WS filtr pro discovery zdroje (Voyo, TV program, ...).
+    v0.0.83: Obecny WS filtr pro discovery zdroje (TV program, platformy, ...).
     Vrati jen polozky s WS soubory + variant_idents.
 
     :param entries: [{"title": str, "year": int|None, "poster": str, ...}]

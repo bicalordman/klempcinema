@@ -446,7 +446,7 @@ def view_list_series_seasons(handle, base_url, params):
     poster_show = info.get("poster") or ""
 
     # v0.0.68: Refresh button nahore - smaze cache a fetchne fresh.
-    # Pouziti: kdyz chce user nove premierove epizody (Voyo, Oneplay).
+    # Pouziti: kdyz chce user nove premierove epizody.
     addon = _addon()
     icon = addon.getAddonInfo("icon")
     refresh_kwargs = {"action": "list_series_seasons", "name": name, "refresh": "1"}
